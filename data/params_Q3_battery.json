@@ -1,0 +1,14 @@
+{
+"consumers": [
+    {
+    "consumer_id": "C_03_BAT",
+    "connection_bus": "Bus1",
+    "list_appliances": [
+        "PV_01_A",
+        "FL_03",
+        "BAT_01"
+    ]
+    }
+],
+"hyperparameters": null
+}

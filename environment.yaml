@@ -1,0 +1,18 @@
+# Conda environment for Assignment 1. Create and activate with:
+#   conda env create -f environment.yaml
+#   conda activate 46750-a1
+# A Gurobi licence is needed on top of the package - see README.md.
+
+name: 46750-a1
+channels:
+  - gurobi
+  - conda-forge
+dependencies:
+  - python=3.11
+  - gurobi::gurobi>=11.0
+  - numpy>=1.26
+  - pandas>=2.1
+  - matplotlib>=3.8
+  # Optional: notebooks
+  - jupyterlab>=4.2
+  - ipykernel>=6.29
