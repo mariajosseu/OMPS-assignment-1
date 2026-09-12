@@ -18,8 +18,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
+import pandas as pd
 
 from .data_loader import InputData
+from .model import FlexibleConsumerModel
 
 
 def scale_prices(data: InputData, factor: float, keep_mean: bool = False) -> InputData:
@@ -69,3 +71,31 @@ def set_load_preferences(
         load_min_kWh=data.load_min_kWh if load_min_kWh is None else load_min_kWh,
         min_daily_energy_kWh=data.min_daily_energy_kWh if min_daily_energy_kWh is None else min_daily_energy_kWh,
     )
+
+
+def sweep_linear_disutility(data: InputData, coefficients: list[float] | np.ndarray) -> pd.DataFrame:
+    """Solve Q2 for each linear disutility coefficient and return a summary table.
+
+    ``load_breakpoint_hours`` counts hours where the solution is at either supplied
+    hourly load bound. The input data has no separate deviation-bound parameter.
+    """
+    if data.reference_load is None:
+        raise ValueError("The linear disutility sweep requires a reference load profile.")
+
+    rows: list[dict[str, float | int]] = []
+    for coefficient in coefficients:
+        coefficient = float(coefficient)
+        if coefficient < 0:
+            raise ValueError("Linear disutility coefficients must be non-negative.")
+        scenario = replace(data, linear_disutility=coefficient)
+        results = FlexibleConsumerModel(scenario).build().solve()
+        metrics = results.daily_metrics
+        rows.append({
+            "c_L_DKK_per_kWh": coefficient,
+            "daily_procurement_cost_DKK": float(metrics["daily_procurement_cost_DKK"]),
+            "total_disutility_DKK": float(metrics["total_disutility_DKK"]),
+            "daily_energy_consumed_kWh": float(metrics["daily_energy_consumed_kWh"]),
+            "total_absolute_deviation_kWh": float(metrics["total_absolute_deviation_kWh"]),
+            "load_breakpoint_hours": int(metrics["load_bound_binding_hours"]),
+        })
+    return pd.DataFrame(rows)
