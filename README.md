@@ -86,6 +86,7 @@ experiment in `main.py`.
 ```bash
 python main.py --question Q1_caseA              # base case
 python main.py --question Q1_caseA --scenarios  # + example sensitivity scenarios
+python main.py --question Q2_linear --linear-sweep 0.0 0.5 1.0 1.43 2.0 3.0
 python main.py --show                           # open the interactive figures in a browser
 ```
 
@@ -107,6 +108,13 @@ plot_schedule(results, data)
 high_spread = scale_prices(data, factor=2.0, keep_mean=True)
 results_hs = FlexibleConsumerModel(high_spread).build().solve()
 ```
+
+For the Question 2 linear-disutility sensitivity analysis, pass the desired values of
+``c^L`` explicitly. The command writes ``results/Q2_linear/linear_sweep.csv`` and
+``results/Q2_linear/linear_sweep.tex`` with the daily
+procurement cost, total disutility, daily energy consumption, total absolute deviation, and
+the number of hours at the load breakpoints. Here, load breakpoints mean the supplied hourly
+minimum or maximum load bounds; no separate deviation bound is present in the input data.
 
 **Implemented model coverage.** `FlexibleConsumerModel.build()` in `src/model.py` contains the
 hourly linear formulation used by Question 1 and Question 2(b) linear disutility. For Question 2,
