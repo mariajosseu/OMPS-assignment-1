@@ -225,14 +225,13 @@ class FlexibleConsumerModel:
              - hourly["export"] * (d.energy_price - d.export_tariff)
                + hourly["pv"] * d.pv_marginal_cost).sum()
            )
+        total_absolute_deviation = float(
+            np.abs(hourly["load"].to_numpy() - d.reference_load).sum()
+        ) if d.reference_load is not None else 0.0
         if "deviation" in hourly:
-            total_disutility = float(d.linear_disutility * hourly["deviation"].sum())
-            total_absolute_deviation = float(hourly["deviation"].sum())
+            total_disutility = float(d.linear_disutility * total_absolute_deviation)
         else:
             total_disutility = 0.0
-            total_absolute_deviation = float(
-                np.abs(hourly["load"].to_numpy() - d.reference_load).sum()
-            ) if d.reference_load is not None else 0.0
         at_load_bound = np.isclose(hourly["load"], d.load_min_kWh, atol=1e-7) | np.isclose(
             hourly["load"], d.load_max_kWh, atol=1e-7
         )
