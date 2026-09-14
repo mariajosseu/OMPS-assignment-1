@@ -105,71 +105,25 @@ def sweep_linear_disutility(data: InputData, coefficients: list[float] | np.ndar
     return pd.DataFrame(rows)
 
 
-def run_scenarios(question: str, out: Path) -> dict[str, Results]:
-    """Run the configured sensitivity scenarios and save their results."""
-    base = load_question(question)
+def sweep_quadratic_disutility(data: InputData, coefficients: list[float] | np.ndarray) -> pd.DataFrame:
+    """Solve Q2 for each quadratic disutility coefficient and return a summary table."""
+    if data.reference_load is None:
+        raise ValueError("The quadratic disutility sweep requires a reference load profile.")
 
-    if question == "Q2_linear":
-        def set_cL(val):
-            d = copy.deepcopy(base)
-            d.linear_disutility = val
-            return d
-
-        scenarios = {
-            "cL_0": set_cL(0),
-            "base": set_cL(1.43),
-            "cL_3": set_cL(3),
-        }
-    elif question == "Q2_quadratic":
-        def set_cQ(val):
-            d = copy.deepcopy(base)
-            d.quadratic_disutility = val
-            return d
-
-        scenarios = {
-            "cQ_0.05": set_cQ(0.05),
-            "cQ_0.30": set_cQ(0.30),
-            "base": base,
-            "cQ_5.00": set_cQ(5.00),
-            "cQ_50.0": set_cQ(50.0),
-        }
-    else:
-        scenarios = {
-            "base": base,
-            "flat_prices": scale_prices(base, factor=0.0, keep_mean=True),
-            "double_spread": scale_prices(base, factor=2.0, keep_mean=True),
-            "no_tariffs": set_tariffs(base, import_tariff=0.0, export_tariff=0.0),
-            "no_pv": scale_pv(base, factor=0.0),
-        }
-
-    runs: dict[str, Results] = {}
-    for name, data in scenarios.items():
-        results = FlexibleConsumerModel(data).build().solve()
-        results.save(out, tag=name)
-        runs[name] = results
-
-        load_list = results.hourly["load"].tolist()
-        ref_list = data.reference_load
-        energy_consumed = sum(load_list)
-        abs_deviation = sum(abs(load - reference) for load, reference in zip(load_list, ref_list))
-
-        if data.question == "Q2_linear":
-            total_disutility = data.linear_disutility * abs_deviation
-        elif data.question == "Q2_quadratic":
-            total_disutility = data.quadratic_disutility * sum(
-                (load - reference) ** 2 for load, reference in zip(load_list, ref_list)
-            )
-        else:
-            total_disutility = 0.0
-
-        procurement_cost = results.objective - total_disutility
-
-        print(f"[{name}]")
-        print(f"  - Objective (Total Cost) : {results.objective:6.2f} DKK")
-        print(f"  - Procurement Cost       : {procurement_cost:6.2f} DKK")
-        print(f"  - Total Disutility       : {total_disutility:6.2f} DKK")
-        print(f"  - Energy Consumed        : {energy_consumed:6.1f} kWh")
-        print(f"  - Absolute Deviation     : {abs_deviation:6.2f} kWh\n")
-
-    plot_scenario_comparison(runs, "objective", save_to=out / "scenarios_cost.png")
-    return runs
+    rows: list[dict[str, float | int]] = []
+    for coefficient in coefficients:
+        coefficient = float(coefficient)
+        if coefficient < 0:
+            raise ValueError("Quadratic disutility coefficients must be non-negative.")
+        scenario = replace(data, quadratic_disutility=coefficient)
+        results = FlexibleConsumerModel(scenario).build().solve()
+        metrics = results.daily_metrics
+        rows.append({
+            "c_Q_DKK_per_kWh2": coefficient,
+            "daily_procurement_cost_DKK": float(metrics["daily_procurement_cost_DKK"]),
+            "total_disutility_DKK": float(metrics["total_disutility_DKK"]),
+            "daily_energy_consumed_kWh": float(metrics["daily_energy_consumed_kWh"]),
+            "total_absolute_deviation_kWh": float(metrics["total_absolute_deviation_kWh"]),
+            "load_breakpoint_hours": int(metrics["load_bound_binding_hours"]),
+        })
+    return pd.DataFrame(rows)

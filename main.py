@@ -18,7 +18,7 @@ from src.data_loader import load_question, list_questions
 
 from src.model import FlexibleConsumerModel, Results
 from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule
-from src.scenarios import run_scenarios, sweep_linear_disutility
+from src.scenarios import sweep_linear_disutility, sweep_quadratic_disutility
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
@@ -55,6 +55,13 @@ def main() -> None:
         metavar="c_L",
         help="solve Q2_linear for the supplied c_L values and save linear_sweep.csv",
     )
+    parser.add_argument(
+        "--quadratic-sweep",
+        nargs="+",
+        type=float,
+        metavar="c_Q",
+        help="solve Q2_quadratic for the supplied c_Q values and save quadratic_sweep.csv",
+    )
     parser.add_argument("--show", action="store_true", help="open the figures in a window")
     args = parser.parse_args()
 
@@ -64,8 +71,6 @@ def main() -> None:
         matplotlib.use("Agg")
 
     base = run_base_case(args.question, out, args.show)
-    if args.scenarios and base is not None:
-        run_scenarios(args.question, out)
     if args.linear_sweep is not None:
         if args.question != "Q2_linear":
             parser.error("--linear-sweep requires --question Q2_linear")
@@ -73,6 +78,13 @@ def main() -> None:
         sweep.to_csv(out / "linear_sweep.csv", index=False)
         (out / "linear_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
         print("\nLinear disutility sweep:\n", sweep.to_string(index=False))
+    if args.quadratic_sweep is not None:
+        if args.question != "Q2_quadratic":
+            parser.error("--quadratic-sweep requires --question Q2_quadratic")
+        sweep = sweep_quadratic_disutility(load_question(args.question), args.quadratic_sweep)
+        sweep.to_csv(out / "quadratic_sweep.csv", index=False)
+        (out / "quadratic_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
+        print("\nQuadratic disutility sweep:\n", sweep.to_string(index=False))
     print(f"\nOutputs written to {out}")
 
 
