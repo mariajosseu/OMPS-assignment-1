@@ -74,14 +74,22 @@ def main() -> None:
     if args.linear_sweep is not None:
         if args.question != "Q2_linear":
             parser.error("--linear-sweep requires --question Q2_linear")
-        sweep = sweep_linear_disutility(load_question(args.question), args.linear_sweep)
+        sweep = sweep_linear_disutility(
+            load_question(args.question),
+            args.linear_sweep,
+            plot_path=out / "linear_sweep_comparison.png",
+        )
         sweep.to_csv(out / "linear_sweep.csv", index=False)
         (out / "linear_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
         print("\nLinear disutility sweep:\n", sweep.to_string(index=False))
     if args.quadratic_sweep is not None:
         if args.question != "Q2_quadratic":
             parser.error("--quadratic-sweep requires --question Q2_quadratic")
-        sweep = sweep_quadratic_disutility(load_question(args.question), args.quadratic_sweep)
+        sweep = sweep_quadratic_disutility(
+            load_question(args.question),
+            args.quadratic_sweep,
+            plot_path=out / "quadratic_sweep_comparison.png",
+        )
         sweep.to_csv(out / "quadratic_sweep.csv", index=False)
         (out / "quadratic_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
         print("\nQuadratic disutility sweep:\n", sweep.to_string(index=False))

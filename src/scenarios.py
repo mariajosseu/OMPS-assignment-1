@@ -77,7 +77,11 @@ def set_load_preferences(
     )
 
 
-def sweep_linear_disutility(data: InputData, coefficients: list[float] | np.ndarray) -> pd.DataFrame:
+def sweep_linear_disutility(
+    data: InputData,
+    coefficients: list[float] | np.ndarray,
+    plot_path: Path | str | None = None,
+) -> pd.DataFrame:
     """Solve Q2 for each linear disutility coefficient and return a summary table.
 
     ``load_breakpoint_hours`` counts hours where the solution is at either supplied
@@ -87,12 +91,14 @@ def sweep_linear_disutility(data: InputData, coefficients: list[float] | np.ndar
         raise ValueError("The linear disutility sweep requires a reference load profile.")
 
     rows: list[dict[str, float | int]] = []
+    runs: dict[str, Results] = {}
     for coefficient in coefficients:
         coefficient = float(coefficient)
         if coefficient < 0:
             raise ValueError("Linear disutility coefficients must be non-negative.")
         scenario = replace(data, linear_disutility=coefficient)
         results = FlexibleConsumerModel(scenario).build().solve()
+        runs[f"c_L={coefficient:g}"] = results
         metrics = results.daily_metrics
         rows.append({
             "c_L_DKK_per_kWh": coefficient,
@@ -102,21 +108,29 @@ def sweep_linear_disutility(data: InputData, coefficients: list[float] | np.ndar
             "total_absolute_deviation_kWh": float(metrics["total_absolute_deviation_kWh"]),
             "load_breakpoint_hours": int(metrics["load_bound_binding_hours"]),
         })
+    if plot_path is not None:
+        plot_scenario_comparison(runs, save_to=plot_path)
     return pd.DataFrame(rows)
 
 
-def sweep_quadratic_disutility(data: InputData, coefficients: list[float] | np.ndarray) -> pd.DataFrame:
+def sweep_quadratic_disutility(
+    data: InputData,
+    coefficients: list[float] | np.ndarray,
+    plot_path: Path | str | None = None,
+) -> pd.DataFrame:
     """Solve Q2 for each quadratic disutility coefficient and return a summary table."""
     if data.reference_load is None:
         raise ValueError("The quadratic disutility sweep requires a reference load profile.")
 
     rows: list[dict[str, float | int]] = []
+    runs: dict[str, Results] = {}
     for coefficient in coefficients:
         coefficient = float(coefficient)
         if coefficient < 0:
             raise ValueError("Quadratic disutility coefficients must be non-negative.")
         scenario = replace(data, quadratic_disutility=coefficient)
         results = FlexibleConsumerModel(scenario).build().solve()
+        runs[f"c_Q={coefficient:g}"] = results
         metrics = results.daily_metrics
         rows.append({
             "c_Q_DKK_per_kWh2": coefficient,
@@ -126,4 +140,6 @@ def sweep_quadratic_disutility(data: InputData, coefficients: list[float] | np.n
             "total_absolute_deviation_kWh": float(metrics["total_absolute_deviation_kWh"]),
             "load_breakpoint_hours": int(metrics["load_bound_binding_hours"]),
         })
+    if plot_path is not None:
+        plot_scenario_comparison(runs, save_to=plot_path)
     return pd.DataFrame(rows)
