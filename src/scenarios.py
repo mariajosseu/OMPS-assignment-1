@@ -15,13 +15,17 @@ minimum daily energy or the reference profile) and document them in the README.
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from .data_loader import InputData
+from .data_loader import InputData, load_question
 from .model import FlexibleConsumerModel
+from .model import Results
+from .plotting import plot_scenario_comparison
 
 
 def scale_prices(data: InputData, factor: float, keep_mean: bool = False) -> InputData:
@@ -99,3 +103,73 @@ def sweep_linear_disutility(data: InputData, coefficients: list[float] | np.ndar
             "load_breakpoint_hours": int(metrics["load_bound_binding_hours"]),
         })
     return pd.DataFrame(rows)
+
+
+def run_scenarios(question: str, out: Path) -> dict[str, Results]:
+    """Run the configured sensitivity scenarios and save their results."""
+    base = load_question(question)
+
+    if question == "Q2_linear":
+        def set_cL(val):
+            d = copy.deepcopy(base)
+            d.linear_disutility = val
+            return d
+
+        scenarios = {
+            "cL_0": set_cL(0),
+            "base": set_cL(1.43),
+            "cL_3": set_cL(3),
+        }
+    elif question == "Q2_quadratic":
+        def set_cQ(val):
+            d = copy.deepcopy(base)
+            d.quadratic_disutility = val
+            return d
+
+        scenarios = {
+            "cQ_0.05": set_cQ(0.05),
+            "cQ_0.30": set_cQ(0.30),
+            "base": base,
+            "cQ_5.00": set_cQ(5.00),
+            "cQ_50.0": set_cQ(50.0),
+        }
+    else:
+        scenarios = {
+            "base": base,
+            "flat_prices": scale_prices(base, factor=0.0, keep_mean=True),
+            "double_spread": scale_prices(base, factor=2.0, keep_mean=True),
+            "no_tariffs": set_tariffs(base, import_tariff=0.0, export_tariff=0.0),
+            "no_pv": scale_pv(base, factor=0.0),
+        }
+
+    runs: dict[str, Results] = {}
+    for name, data in scenarios.items():
+        results = FlexibleConsumerModel(data).build().solve()
+        results.save(out, tag=name)
+        runs[name] = results
+
+        load_list = results.hourly["load"].tolist()
+        ref_list = data.reference_load
+        energy_consumed = sum(load_list)
+        abs_deviation = sum(abs(load - reference) for load, reference in zip(load_list, ref_list))
+
+        if data.question == "Q2_linear":
+            total_disutility = data.linear_disutility * abs_deviation
+        elif data.question == "Q2_quadratic":
+            total_disutility = data.quadratic_disutility * sum(
+                (load - reference) ** 2 for load, reference in zip(load_list, ref_list)
+            )
+        else:
+            total_disutility = 0.0
+
+        procurement_cost = results.objective - total_disutility
+
+        print(f"[{name}]")
+        print(f"  - Objective (Total Cost) : {results.objective:6.2f} DKK")
+        print(f"  - Procurement Cost       : {procurement_cost:6.2f} DKK")
+        print(f"  - Total Disutility       : {total_disutility:6.2f} DKK")
+        print(f"  - Energy Consumed        : {energy_consumed:6.1f} kWh")
+        print(f"  - Absolute Deviation     : {abs_deviation:6.2f} kWh\n")
+
+    plot_scenario_comparison(runs, "objective", save_to=out / "scenarios_cost.png")
+    return runs
