@@ -97,8 +97,9 @@ class FlexibleConsumerModel:
         self.var["export"] = m.addVars(T, lb=-GRB.INFINITY, name="export")
 
         is_q2_linear = d.reference_load is not None and d.linear_disutility is not None
-        if d.reference_load is not None and not is_q2_linear:
-            raise NotImplementedError("Only the linear Question 2 formulation is implemented in this model.")
+        is_q2_quadratic = d.reference_load is not None and d.quadratic_disutility is not None
+        if d.reference_load is not None and not (is_q2_linear or is_q2_quadratic):
+            raise NotImplementedError("Question 2 requires linear or quadratic disutility data.")
         if is_q2_linear:
             self.var["deviation"] = m.addVars(T, lb=-GRB.INFINITY, name="deviation")
 
@@ -114,6 +115,12 @@ class FlexibleConsumerModel:
         if is_q2_linear:
             objective = gp.quicksum(hourly_cost) + d.linear_disutility * gp.quicksum(
                 self.var["deviation"][t] for t in T
+            )
+        elif is_q2_quadratic:
+            objective = gp.quicksum(
+                hourly_cost
+            ) + d.quadratic_disutility * gp.quicksum(
+                (load[t] - d.reference_load[t]) ** 2 for t in T
             )
         elif d.consumption_utility is not None:
             objective = gp.quicksum(hourly_cost) - d.consumption_utility * gp.quicksum(load[t] for t in T)
@@ -230,6 +237,11 @@ class FlexibleConsumerModel:
         ) if d.reference_load is not None else 0.0
         if "deviation" in hourly:
             total_disutility = float(d.linear_disutility * total_absolute_deviation)
+        elif d.reference_load is not None and d.quadratic_disutility is not None:
+            total_disutility = float(
+                d.quadratic_disutility
+                * np.square(hourly["load"].to_numpy() - d.reference_load).sum()
+            )
         else:
             total_disutility = 0.0
         at_load_bound = np.isclose(hourly["load"], d.load_min_kWh, atol=1e-7) | np.isclose(
