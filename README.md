@@ -51,8 +51,7 @@ and activate it with `grbgetkey <your-key>` (on the DTU network or VPN).
 python main.py
 ```
 This loads the `Q1_caseA` case from `data/`, prints a summary of the input data and saves the
-input figure to `results/Q1_caseA/`. Until you complete the model (see Section 3) it prints
-`[skipped] The model has no constraints ...` and stops there - that is expected.
+interactive Plotly figures as HTML files under `results/Q1_caseA/`.
 
 ## 2. Repository structure
 
@@ -62,7 +61,7 @@ src/
   data_loader.py         load_question("Q1_caseA") -> InputData (all parameters, with units)
   model.py               FlexibleConsumerModel: build() / solve() -> Results (primal + dual values)
   scenarios.py           Helpers that derive sensitivity scenarios from a base InputData
-  plotting.py            Figures for inputs, optimal schedule, duals and scenario comparisons
+  plotting.py            Plotly figures for inputs, optimal schedule, duals and scenario comparisons
 data/
   appliance_params.json  SHARED catalogue: every PV system, flexible load and battery - see Section 4
   bus_params.json        SHARED grid connection: prices (both days) and tariffs
@@ -87,7 +86,8 @@ experiment in `main.py`.
 ```bash
 python main.py --question Q1_caseA              # base case
 python main.py --question Q1_caseA --scenarios  # + example sensitivity scenarios
-python main.py --show                           # open the figures in a window
+python main.py --question Q2_linear --linear-sweep 0.0 0.5 1.0 1.43 2.0 3.0
+python main.py --show                           # open the interactive figures in a browser
 ```
 
 **Use it from a notebook or your own script** (run from the repository root):
@@ -109,11 +109,19 @@ high_spread = scale_prices(data, factor=2.0, keep_mean=True)
 results_hs = FlexibleConsumerModel(high_spread).build().solve()
 ```
 
-**What you need to implement.** `FlexibleConsumerModel.build()` in `src/model.py` is entirely `TODO`:
-identify and declare the decision variables of your formulation, then add the objective and the
-constraints - the gurobipy pattern for each step is shown in comments (including the `vtype=` to use
-if you ever declare binary variables). Complete it with your formulation from Question 1, then extend
-or subclass it for the following questions.
+For the Question 2 linear-disutility sensitivity analysis, pass the desired values of
+``c^L`` explicitly. The command writes ``results/Q2_linear/linear_sweep.csv`` and
+``results/Q2_linear/linear_sweep.tex`` with the daily
+procurement cost, total disutility, daily energy consumption, total absolute deviation, and
+the number of hours at the load breakpoints. Here, load breakpoints mean the supplied hourly
+minimum or maximum load bounds; no separate deviation bound is present in the input data.
+
+**Implemented model coverage.** `FlexibleConsumerModel.build()` in `src/model.py` contains the
+hourly linear formulation used by Question 1 and Question 2(b) linear disutility. For Question 2,
+the auxiliary `deviation` variable represents the absolute deviation from the supplied reference
+profile through two linear inequalities and a non-negativity constraint. The solved `Results` object
+contains the full hourly primal solution and daily metrics. The repository still expects you to
+extend or subclass the model for the remaining questions.
 Everything downstream (solving, extraction of primal and dual values, saving, plotting) already works.
 
 **Conventions that make the primal and dual values come out for free**
