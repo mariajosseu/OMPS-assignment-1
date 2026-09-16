@@ -138,6 +138,11 @@ class FlexibleConsumerModel:
         self.con["load_max"] = m.addConstrs(
             (load[t] <= d.load_max_kWh for t in T), name="load_max"
         )
+
+        if d.min_daily_energy_kWh is not None:
+            self.con["daily_energy_min"] = m.addConstr(
+                gp.quicksum(load[t] for t in T) >= d.min_daily_energy_kWh, name="daily_energy_min"
+            )
         self.con["pv_min"] = m.addConstrs((pv[t] >= 0 for t in T), name="pv_min")
         self.con["pv_max"] = m.addConstrs(
             (pv[t] <= d.pv_available[t] for t in T), name="pv_max"
