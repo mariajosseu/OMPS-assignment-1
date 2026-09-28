@@ -90,6 +90,67 @@ def plot_duals(results: Results, data: InputData, save_to: Path | str | None = N
     return _finish(fig, save_to)
 
 
+def plot_min_energy_comparison(
+    constrained: Results,
+    unconstrained: Results,
+    data: InputData,
+    save_to: Path | str | None = None,
+) -> plt.Figure:
+    """Question 3.(e): the E_min-constrained schedule against the reference profile and against the
+    unconstrained consumer of Question 2.(c), solved on the same data.
+
+    Three panels on a shared hour axis:
+      1. hourly load (kWh/h): reference profile, unconstrained 2.(c) load, constrained Q3 load;
+      2. load shift Q3 - 2.(c) (kWh/h): where the extra energy required by E_min is placed;
+      3. marginal value of energy at the connection point, lambda_t = dual of the power balance
+         (DKK/kWh), against the E_min multiplier mu (DKK/kWh). Hours with mu > lambda_t are shaded:
+         there the Q3 load is expected above the reference (if not at a load bound).
+    ``constrained`` must contain the ``dual_balance`` column and ``duals["daily_energy_min"]``.
+    """
+    ref_color, unc_color, con_color = "#8a8a85", "#2a78d6", "#eb6834"
+    h = constrained.hourly.index.to_numpy()
+    ref = data.reference_load
+    l_unc = unconstrained.hourly["load"].to_numpy()
+    l_con = constrained.hourly["load"].to_numpy()
+    lam = constrained.hourly["dual_balance"].to_numpy()
+    mu = constrained.duals.get("daily_energy_min", 0.0)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(
+        3, 1, figsize=(11, 8.5), sharex=True, gridspec_kw={"height_ratios": [3, 1.6, 1.8]}
+    )
+    for ax in (ax1, ax2, ax3):
+        ax.grid(axis="y", color="#e4e3dc", lw=0.8)
+        ax.set_axisbelow(True)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+
+    ax1.step(h, ref, where="mid", color=ref_color, ls="--", lw=1.5, label=f"reference ({ref.sum():.1f} kWh)")
+    ax1.plot(h, l_unc, "o-", color=unc_color, lw=2, ms=4,
+             label=f"unconstrained 2.(c) ({l_unc.sum():.1f} kWh)")
+    ax1.plot(h, l_con, "s-", color=con_color, lw=2, ms=4,
+             label=f"with E_min = {data.min_daily_energy_kWh:g} kWh ({l_con.sum():.1f} kWh)")
+    ax1.set(ylabel="load [kWh/h]", title=f"Question 3.(e) - effect of the minimum daily energy requirement ({data.question})")
+    ax1.legend(fontsize=8, loc="upper left", frameon=False)
+
+    shift = l_con - l_unc
+    ax2.bar(h, shift, 0.7, color=con_color)
+    ax2.axhline(0, color="#55544f", lw=0.8)
+    ax2.set(ylabel="Q3 - 2.(c)\n[kWh/h]")
+    ax2.text(0.99, 0.95, f"total shift {shift.sum():+.1f} kWh", transform=ax2.transAxes,
+             ha="right", va="top", fontsize=8, color="#55544f")
+
+    above = mu > lam + 1e-9
+    for t in h[above]:
+        ax3.axvspan(t - 0.5, t + 0.5, color=con_color, alpha=0.12, lw=0)
+    ax3.step(h, lam, where="mid", color="#1f1f1d", lw=1.5, label="lambda_t (dual of power balance)")
+    ax3.axhline(mu, color=con_color, lw=2, label=f"mu (dual of E_min) = {mu:.3f}")
+    ax3.set(xlabel="hour", ylabel="DKK/kWh")
+    ax3.set_xticks(h[::2])
+    ax3.legend(fontsize=8, loc="upper left", frameon=False, ncol=2,
+               title="shaded: mu > lambda_t, load expected above reference", title_fontsize=8)
+    return _finish(fig, save_to)
+
+
 def plot_scenario_comparison(
     runs: dict[str, Results], metric: str = "objective", save_to: Path | str | None = None
 ) -> plt.Figure:

@@ -77,6 +77,17 @@ def set_load_preferences(
     )
 
 
+def drop_min_energy(data: InputData) -> InputData:
+    """Remove the minimum daily energy requirement (sets ``min_daily_energy_kWh`` to ``None``).
+
+    Applied to the ``Q3`` data this gives the unconstrained quadratic-disutility consumer of
+    Question 2.(c) on exactly the same prices, PV, bounds, reference profile and c_Q, so that the
+    E_min constraint is the only difference between the two runs (Question 3.(e)).
+    ``set_load_preferences`` cannot do this, since there ``None`` means "keep the current value".
+    """
+    return replace(data, min_daily_energy_kWh=None)
+
+
 def sweep_linear_disutility(
     data: InputData,
     coefficients: list[float] | np.ndarray,
