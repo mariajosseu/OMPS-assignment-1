@@ -77,6 +77,13 @@ def set_load_preferences(
     )
 
 
+def set_quadratic_disutility(data: InputData, coefficient: float) -> InputData:
+    """Override the quadratic disutility coefficient c_Q (DKK/kWh^2)."""
+    if coefficient <= 0:
+        raise ValueError("The quadratic disutility coefficient must be strictly positive.")
+    return replace(data, quadratic_disutility=float(coefficient))
+
+
 def drop_min_energy(data: InputData) -> InputData:
     """Remove the minimum daily energy requirement (sets ``min_daily_energy_kWh`` to ``None``).
 

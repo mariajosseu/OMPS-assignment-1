@@ -4,6 +4,7 @@
     python main.py --question Q2_linear     # another case
     python main.py --scenarios              # also run the example sensitivity scenarios
     python main.py --question Q3 --compare-unconstrained   # Question 3.(e)
+    python main.py --question Q3 --sensitivity             # Question 3.(f)
 
 Results (CSV, TXT, PNG) are written to ``results/<question>/``. Extend ``run_scenarios``
 with your own scenarios, or add a new function per question, as your analysis grows.
@@ -22,8 +23,12 @@ from src.data_loader import load_question, list_questions
 from src.model import FlexibleConsumerModel, Results
 from src.plotting import (
     plot_duals, plot_inputs, plot_min_energy_comparison, plot_scenario_comparison, plot_schedule,
+    plot_sensitivity,
 )
-from src.scenarios import drop_min_energy, sweep_linear_disutility, sweep_quadratic_disutility
+from src.scenarios import (
+    drop_min_energy, scale_prices, set_load_preferences, set_quadratic_disutility,
+    sweep_linear_disutility, sweep_quadratic_disutility,
+)
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
@@ -118,6 +123,95 @@ def run_min_energy_comparison(question: str, out: Path, tol: float = 1e-6) -> pd
     return daily
 
 
+def _min_energy_metrics(data, tol: float = 1e-6) -> tuple[dict, np.ndarray | None]:
+    """Solve one scenario of the minimum-energy consumer and return (daily metrics, hourly load).
+
+    Metrics: mu (DKK/kWh), energy (kWh), procurement cost, disutility and objective (DKK),
+    hours above / below the reference and at L_max, energy above / below the reference (kWh),
+    PV curtailed (kWh). An infeasible scenario returns ``{"status": "INFEASIBLE"}`` and no load.
+    """
+    try:
+        r = FlexibleConsumerModel(data).build().solve()
+    except RuntimeError:
+        return {"status": "INFEASIBLE"}, None
+    load = r.hourly["load"].to_numpy()
+    dev = load - data.reference_load
+    m = r.daily_metrics
+    return {
+        "status": r.status,
+        "mu_DKK_per_kWh": r.duals.get("daily_energy_min", 0.0),
+        "daily_energy_consumed_kWh": m["daily_energy_consumed_kWh"],
+        "daily_procurement_cost_DKK": m["daily_procurement_cost_DKK"],
+        "total_disutility_DKK": m["total_disutility_DKK"],
+        "objective_DKK": r.objective,
+        "hours_above_reference": int((dev > tol).sum()),
+        "hours_below_reference": int((dev < -tol).sum()),
+        "hours_at_max_load": int((load > data.load_max_kWh - tol).sum()),
+        "energy_above_reference_kWh": float(dev[dev > tol].sum()),
+        "energy_below_reference_kWh": float(-dev[dev < -tol].sum()),
+        "pv_curtailed_kWh": float((r.hourly["pv_available"] - r.hourly["pv"]).sum()),
+    }, load
+
+
+def _run_sweep(name, param, param_label, values, make_scenario, profile_values, out, title,
+               vlines=None, logx=False) -> pd.DataFrame:
+    """Solve ``make_scenario(v)`` for every v in ``values``; save ``q3f_<name>.csv/.tex/.png``."""
+    rows, profiles = [], {}
+    for v in values:
+        scenario = make_scenario(v)
+        metrics, load = _min_energy_metrics(scenario)
+        rows.append({param: v, **metrics})
+        if load is not None and any(np.isclose(v, p) for p in profile_values):
+            profiles[v] = load
+    sweep = pd.DataFrame(rows)
+    sweep.to_csv(out / f"q3f_{name}.csv", index=False)
+    cols = [param, "mu_DKK_per_kWh", "daily_energy_consumed_kWh", "daily_procurement_cost_DKK",
+            "total_disutility_DKK", "hours_above_reference", "hours_below_reference", "hours_at_max_load"]
+    (out / f"q3f_{name}.tex").write_text(
+        sweep[sweep["status"] == "OPTIMAL"][cols].to_latex(index=False, float_format="%.2f"), encoding="utf-8"
+    )
+    plot_sensitivity(sweep, param, param_label, profiles, make_scenario(values[0]).reference_load, title,
+                     vlines=vlines, logx=logx, save_to=out / f"q3f_{name}.png")
+    print(f"\nSensitivity to {param_label}:\n",
+          sweep.drop(columns=["status"]).to_string(index=False, float_format=lambda x: f"{x:.2f}"))
+    return sweep
+
+
+def run_min_energy_sensitivity(question: str, out: Path) -> dict[str, pd.DataFrame]:
+    """Question 3.(f): three one-at-a-time sweeps around the base case, all else fixed.
+
+    * ``Emin``   - E_min from 0 to 150 kWh (step 5, step 1 between 20 and 45 where the regimes change);
+      above 24 * L_max = 144 kWh the problem is infeasible.
+      Marked thresholds: E_unc (energy of the unconstrained 2.(c) consumer) and sum of the reference.
+    * ``cQ``     - quadratic disutility coefficient c_Q from 0.05 to 20 DKK/kWh^2 (E_min = base).
+    * ``spread`` - price spread factor around the unchanged daily mean (``scale_prices(keep_mean=True)``),
+      from 0 (flat price) to 1.95, the largest factor that keeps every p_t above the export tariff.
+    Writes ``q3f_<sweep>.csv``, ``.tex`` and ``.png`` to ``out``. Returns the three tables.
+    """
+    data = load_question(question)
+    e_unc = FlexibleConsumerModel(drop_min_energy(data)).build().solve().hourly["load"].sum()
+    ref_sum = data.reference_load.sum()
+    return {
+        "Emin": _run_sweep(
+            "Emin", "E_min_kWh", "E_min [kWh]", list(np.union1d(np.arange(0.0, 151.0, 5.0), np.arange(20.0, 46.0, 1.0))),
+            lambda v: set_load_preferences(data, min_daily_energy_kWh=v), [15.0, 28.0, 34.0, 40.0, 100.0], out,
+            "Sensitivity to the minimum daily energy E_min",
+            vlines={"E_unc": e_unc, "sum ref": ref_sum, "24 L_max": 24 * data.load_max_kWh},
+        ),
+        "cQ": _run_sweep(
+            "cQ", "c_Q", "c_Q [DKK/kWh2]", [0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0],
+            lambda v: set_quadratic_disutility(data, v), [0.1, 1.0, 10.0], out,
+            f"Sensitivity to the disutility coefficient c_Q (E_min = {data.min_daily_energy_kWh:g} kWh)",
+            logx=True,
+        ),
+        "spread": _run_sweep(
+            "spread", "spread_factor", "price spread factor", [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 1.95],
+            lambda v: scale_prices(data, v, keep_mean=True), [0.0, 1.0, 1.95], out,
+            f"Sensitivity to the price spread, same mean (E_min = {data.min_daily_energy_kWh:g} kWh)",
+        ),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--question", default="Q1_caseA", choices=list_questions(), help="data case to use")
@@ -140,6 +234,11 @@ def main() -> None:
         "--compare-unconstrained",
         action="store_true",
         help="Q3.(e): compare the E_min-constrained base case with the unconstrained 2.(c) consumer",
+    )
+    parser.add_argument(
+        "--sensitivity",
+        action="store_true",
+        help="Q3.(f): one-at-a-time sweeps of E_min, c_Q and the price spread",
     )
     parser.add_argument("--show", action="store_true", help="open the figures in a window")
     args = parser.parse_args()
@@ -176,6 +275,10 @@ def main() -> None:
         if args.question != "Q3":
             parser.error("--compare-unconstrained requires --question Q3")
         run_min_energy_comparison(args.question, out)
+    if args.sensitivity:
+        if args.question != "Q3":
+            parser.error("--sensitivity requires --question Q3")
+        run_min_energy_sensitivity(args.question, out)
     print(f"\nOutputs written to {out}")
 
 

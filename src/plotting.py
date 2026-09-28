@@ -9,6 +9,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from .data_loader import InputData
 from .model import Results
@@ -148,6 +149,71 @@ def plot_min_energy_comparison(
     ax3.set_xticks(h[::2])
     ax3.legend(fontsize=8, loc="upper left", frameon=False, ncol=2,
                title="shaded: mu > lambda_t, load expected above reference", title_fontsize=8)
+    return _finish(fig, save_to)
+
+
+def plot_sensitivity(
+    sweep: pd.DataFrame,
+    param: str,
+    param_label: str,
+    profiles: dict[float, np.ndarray],
+    reference: np.ndarray,
+    title: str,
+    vlines: dict[str, float] | None = None,
+    logx: bool = False,
+    save_to: Path | str | None = None,
+) -> plt.Figure:
+    """One-parameter sensitivity of the minimum-energy consumer.
+
+    ``sweep`` has one row per run with the column ``param``, a ``status`` column and the metrics
+    ``mu_DKK_per_kWh``, ``hours_above_reference``, ``hours_below_reference``, ``hours_at_max_load``.
+    ``profiles`` maps selected parameter values to their hourly load (kWh/h), drawn against
+    ``reference`` (kWh/h). ``vlines`` marks named parameter thresholds. Infeasible runs are shaded.
+    Panels: mu (DKK/kWh) | hours above / below the reference and at L_max | selected load profiles.
+    """
+    blue, orange, aqua, grey, ink = "#2a78d6", "#eb6834", "#1baf7a", "#8a8a85", "#55544f"
+    ramp = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#0d366b"]   # one-hue ramp for ordered parameter values
+
+    fig = plt.figure(figsize=(11, 7.5))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.2])
+    ax_mu, ax_h, ax_p = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, :])
+    for ax in (ax_mu, ax_h, ax_p):
+        ax.grid(axis="y", color="#e4e3dc", lw=0.8)
+        ax.set_axisbelow(True)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+
+    ok = sweep["status"] == "OPTIMAL"
+    s = sweep[ok]
+    ax_mu.plot(s[param], s["mu_DKK_per_kWh"], "o-", color=blue, lw=2, ms=4)
+    ax_mu.set(xlabel=param_label, ylabel="mu [DKK/kWh]", title="Multiplier of the E_min requirement")
+    ax_h.plot(s[param], s["hours_above_reference"], "o-", color=orange, lw=2, ms=4, label="above reference")
+    ax_h.plot(s[param], s["hours_below_reference"], "s-", color=blue, lw=2, ms=4, label="below reference")
+    ax_h.plot(s[param], s["hours_at_max_load"], "^-", color=aqua, lw=2, ms=4, label="at L_max")
+    ax_h.set(xlabel=param_label, ylabel="hours", ylim=(-1, 25), title="Hours per regime")
+    ax_h.legend(fontsize=8, frameon=False)
+
+    for ax in (ax_mu, ax_h):
+        if logx:
+            ax.set_xscale("log")
+        for name, x in (vlines or {}).items():
+            ax.axvline(x, color=grey, ls=":", lw=1.2)
+            ax.text(x, 1.0, f" {name}", transform=ax.get_xaxis_transform(), rotation=90,
+                    va="top", ha="right", fontsize=7, color=ink)
+        if (~ok).any():
+            x0 = sweep.loc[~ok, param].min()
+            ax.axvspan(x0, sweep[param].max(), color=grey, alpha=0.15, lw=0)
+            ax.text(x0, 0.5, " infeasible", transform=ax.get_xaxis_transform(), fontsize=7, color=ink)
+
+    h = np.arange(len(reference))
+    ax_p.step(h, reference, where="mid", color=grey, ls="--", lw=1.5, label="reference")
+    idx = np.linspace(0, len(ramp) - 1, len(profiles)).round().astype(int)
+    for (value, load), i in zip(profiles.items(), idx):
+        ax_p.plot(h, load, "o-", color=ramp[i], lw=2, ms=3, label=f"{param_label.split(' [')[0]} = {value:g} ({load.sum():.1f} kWh)")
+    ax_p.set(xlabel="hour", ylabel="load [kWh/h]", title="Selected load profiles")
+    ax_p.set_xticks(h[::2])
+    ax_p.legend(fontsize=8, frameon=False, loc="upper left")
+    fig.suptitle(title, fontsize=11)
     return _finish(fig, save_to)
 
 
