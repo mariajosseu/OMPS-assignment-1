@@ -126,17 +126,17 @@ def plot_min_energy_comparison(
 
     ax1.step(h, ref, where="mid", color=ref_color, ls="--", lw=1.5, label=f"reference ({ref.sum():.1f} kWh)")
     ax1.plot(h, l_unc, "o-", color=unc_color, lw=2, ms=4,
-             label=f"unconstrained 2.(c) ({l_unc.sum():.1f} kWh)")
+             label=f"without E_min ({l_unc.sum():.1f} kWh)")
     ax1.plot(h, l_con, "s-", color=con_color, lw=2, ms=4,
              label=f"with E_min = {data.min_daily_energy_kWh:g} kWh ({l_con.sum():.1f} kWh)")
-    ax1.set(ylabel="load [kWh/h]", title=f"Question 3.(e) - effect of the minimum daily energy requirement ({data.question})")
+    ax1.set(ylabel="load [kWh/h]", title="Effect of the minimum daily energy requirement")
     ax1.legend(fontsize=8, loc="upper left", frameon=False)
 
     shift = l_con - l_unc
     ax2.bar(h, shift, 0.7, color=con_color)
     ax2.axhline(0, color="#55544f", lw=0.8)
-    ax2.set(ylabel="Q3 - 2.(c)\n[kWh/h]")
-    ax2.text(0.99, 0.95, f"total shift {shift.sum():+.1f} kWh", transform=ax2.transAxes,
+    ax2.set(ylabel="load shift\n[kWh/h]")
+    ax2.text(0.99, 0.95, f"with - without E_min, total {shift.sum():+.1f} kWh", transform=ax2.transAxes,
              ha="right", va="top", fontsize=8, color="#55544f")
 
     above = mu > lam + 1e-9
