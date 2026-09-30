@@ -25,7 +25,7 @@ import pandas as pd
 from .data_loader import InputData, load_question
 from .model import FlexibleConsumerModel
 from .model import Results
-from .plotting import plot_scenario_comparison
+from .plotting import plot_load_scenarios, plot_scenario_comparison
 
 
 def scale_prices(data: InputData, factor: float, keep_mean: bool = False) -> InputData:
@@ -110,6 +110,11 @@ def sweep_linear_disutility(
         })
     if plot_path is not None:
         plot_scenario_comparison(runs, save_to=plot_path)
+        plot_load_scenarios(
+            runs,
+            save_to=Path(plot_path).with_name("linear_load_comparison.png"),
+            title="Actual load for linear disutility scenarios",
+        )
     return pd.DataFrame(rows)
 
 
@@ -142,6 +147,11 @@ def sweep_quadratic_disutility(
         })
     if plot_path is not None:
         plot_scenario_comparison(runs, save_to=plot_path)
+        plot_load_scenarios(
+            runs,
+            save_to=Path(plot_path).with_name("quadratic_load_comparison.png"),
+            title="Actual load for quadratic disutility scenarios",
+        )
     return pd.DataFrame(rows)
 
 

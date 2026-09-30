@@ -158,4 +158,42 @@ def plot_temporal_metrics(summary, save_to: Path | str | None = None) -> plt.Fig
         axis.set(xticks=x, xticklabels=[profile.title() for profile in profiles], ylabel=ylabel, title=title)
         axis.grid(axis="y", alpha=0.2)
     axes[0].legend(fontsize=8)
+    
+
+def plot_load_scenarios(
+    runs: dict[str, Results], save_to: Path | str | None = None, title: str = "Actual load for sensitivity scenarios"
+) -> plt.Figure:
+    """Plot the hourly actual load and reference profile for each scenario."""
+    fig, ax = plt.subplots(figsize=(11, 4.2))
+    for name, results in runs.items():
+        hourly = results.hourly
+        ax.step(hourly.index, hourly["load"], where="mid", label=name)
+    first_hourly = next(iter(runs.values())).hourly
+    if "reference_load" in first_hourly:
+        ax.step(
+            first_hourly.index,
+            first_hourly["reference_load"],
+            where="mid",
+            color="black",
+            linestyle="--",
+            linewidth=1.5,
+            label="reference load",
+        )
+    ax2 = ax.twinx()
+    ax2.step(
+        first_hourly.index,
+        first_hourly["price"],
+        where="mid",
+        color="tab:red",
+        linestyle=":",
+        linewidth=1.5,
+        label="electricity price",
+    )
+    ax.set(xlabel="hour", ylabel="actual load [kWh/h]", title=title)
+    ax2.set_ylabel("electricity price [DKK/kWh]", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
+    ax.set_xticks(range(24))
+    lines, labels = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines + lines2, labels + labels2, fontsize=8, ncol=2)
     return _finish(fig, save_to)
