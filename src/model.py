@@ -76,9 +76,22 @@ def _dual(c) -> float:
 class FlexibleConsumerModel:
     """Consumption problem of one consumer over a 24-hour horizon (Question 1); extend it for Questions 2 and 3."""
 
-    def __init__(self, data: InputData, name: str = "flexible_consumer", verbose: bool = False):
+    def __init__(
+        self,
+        data: InputData,
+        name: str = "flexible_consumer",
+        verbose: bool = False,
+        temporal_disutility: float | None = None,
+        temporal_window_hours: int = 3,
+    ):
         self.data = data
         self.T = range(data.n_hours)
+        if temporal_disutility is not None and (not np.isfinite(temporal_disutility) or temporal_disutility < 0):
+            raise ValueError("Temporal disutility coefficient must be finite and non-negative.")
+        if temporal_window_hours < 1:
+            raise ValueError("Temporal disutility window must contain at least one hour.")
+        self.temporal_disutility = temporal_disutility
+        self.temporal_window_hours = temporal_window_hours
         self.m = gp.Model(name)
         self.m.Params.OutputFlag = 1 if verbose else 0
         self.m.Params.QCPDual = 1          # only relevant if you add a quadratic constraint (none is needed in Assignment 1)
@@ -96,12 +109,19 @@ class FlexibleConsumerModel:
         self.var["import"] = m.addVars(T, lb=-GRB.INFINITY, name="import")
         self.var["export"] = m.addVars(T, lb=-GRB.INFINITY, name="export")
 
-        is_q2_linear = d.reference_load is not None and d.linear_disutility is not None
-        is_q2_quadratic = d.reference_load is not None and d.quadratic_disutility is not None
-        if d.reference_load is not None and not (is_q2_linear or is_q2_quadratic):
+        is_temporal = self.temporal_disutility is not None
+        is_q2_linear = d.reference_load is not None and d.linear_disutility is not None and not is_temporal
+        is_q2_quadratic = d.reference_load is not None and d.quadratic_disutility is not None and not is_temporal
+        if is_temporal and d.reference_load is None:
+            raise ValueError("Temporal disutility requires a reference load profile.")
+        if d.reference_load is not None and not (
+            is_temporal or is_q2_linear or is_q2_quadratic or d.consumption_utility is not None
+        ):
             raise NotImplementedError("Question 2 requires linear or quadratic disutility data.")
-        if is_q2_linear:
+        if is_q2_linear or is_temporal:
             self.var["deviation"] = m.addVars(T, lb=-GRB.INFINITY, name="deviation")
+        if is_temporal:
+            self.var["rolling_deviation"] = m.addVars(T, lb=0, name="rolling_deviation")
 
         # --- Objective ---------------------------------------------------------------
         load = self.var["load"]
@@ -112,7 +132,11 @@ class FlexibleConsumerModel:
                        - (d.energy_price[t] - d.export_tariff) * exported[t]
                        + d.pv_marginal_cost * pv[t]
                        for t in T)
-        if is_q2_linear:
+        if is_temporal:
+            objective = gp.quicksum(hourly_cost) + self.temporal_disutility * gp.quicksum(
+                self.var["rolling_deviation"][t] ** 2 for t in T
+            )
+        elif is_q2_linear:
             objective = gp.quicksum(hourly_cost) + d.linear_disutility * gp.quicksum(
                 self.var["deviation"][t] for t in T
             )
@@ -158,7 +182,7 @@ class FlexibleConsumerModel:
             self.con["export_max"] = m.addConstrs(
                 (exported[t] <= d.max_export_kW for t in T), name="export_max"
             )
-        if is_q2_linear:
+        if is_q2_linear or is_temporal:
             deviation = self.var["deviation"]
             self.con["deviation_positive"] = m.addConstrs(
                 (deviation[t] >= load[t] - d.reference_load[t] for t in T),
@@ -170,6 +194,19 @@ class FlexibleConsumerModel:
             )
             self.con["deviation_nonnegative"] = m.addConstrs(
                 (deviation[t] >= 0 for t in T), name="deviation_nonnegative"
+            )
+        if is_temporal:
+            rolling_deviation = self.var["rolling_deviation"]
+            self.con["rolling_deviation_definition"] = m.addConstrs(
+                (
+                    rolling_deviation[t]
+                    == gp.quicksum(
+                        self.var["deviation"][j]
+                        for j in range(max(0, t - self.temporal_window_hours + 1), t + 1)
+                    )
+                    for t in T
+                ),
+                name="rolling_deviation_definition",
             )
 
         m.update()
@@ -240,7 +277,11 @@ class FlexibleConsumerModel:
         total_absolute_deviation = float(
             np.abs(hourly["load"].to_numpy() - d.reference_load).sum()
         ) if d.reference_load is not None else 0.0
-        if "deviation" in hourly:
+        if "rolling_deviation" in hourly:
+            total_disutility = float(
+                self.temporal_disutility * np.square(hourly["rolling_deviation"].to_numpy()).sum()
+            )
+        elif "deviation" in hourly:
             total_disutility = float(d.linear_disutility * total_absolute_deviation)
         elif d.reference_load is not None and d.quadratic_disutility is not None:
             total_disutility = float(
@@ -252,10 +293,13 @@ class FlexibleConsumerModel:
         at_load_bound = np.isclose(hourly["load"], d.load_min_kWh, atol=1e-7) | np.isclose(
             hourly["load"], d.load_max_kWh, atol=1e-7
         )
+        daily_energy = float(hourly["load"].sum())
+        daily_utility = float(d.consumption_utility * daily_energy) if d.consumption_utility is not None else 0.0
         return {
             "daily_procurement_cost_DKK": procurement_cost,
             "total_disutility_DKK": total_disutility,
-            "daily_energy_consumed_kWh": float(hourly["load"].sum()),
+            "daily_net_surplus_DKK": daily_utility - procurement_cost - total_disutility,
+            "daily_energy_consumed_kWh": daily_energy,
             "total_absolute_deviation_kWh": total_absolute_deviation,
             "deviation_bound_binding_hours": None,
             "deviation_bound_note": (

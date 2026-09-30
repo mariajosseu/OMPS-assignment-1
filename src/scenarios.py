@@ -143,3 +143,85 @@ def sweep_quadratic_disutility(
     if plot_path is not None:
         plot_scenario_comparison(runs, save_to=plot_path)
     return pd.DataFrame(rows)
+
+
+def compare_temporal_price_profiles(
+    data: InputData,
+    temporal_disutility: float = 0.1,
+    temporal_window_hours: int = 3,
+) -> tuple[pd.DataFrame, dict[str, np.ndarray], dict[str, dict[str, Results]]]:
+    """Compare preference models under alternating and block-ordered prices.
+
+    Both synthetic profiles contain exactly the same hourly price values, so their mean,
+    range and histogram match. Only the ordering differs. Returns a metric table, the price
+    profiles, and solved results indexed by profile and model label.
+    """
+    if data.reference_load is None:
+        raise ValueError("The temporal-price experiment requires a reference load profile.")
+
+    sorted_prices = np.sort(data.energy_price)
+    lower_prices = sorted_prices[: data.n_hours // 2]
+    upper_prices = sorted_prices[data.n_hours // 2 :]
+    profiles = {
+        "alternating": np.column_stack((lower_prices, upper_prices)).reshape(-1),
+        "block": np.concatenate((lower_prices, upper_prices)),
+    }
+
+    utility = load_question("Q1_caseA").consumption_utility
+    linear_coefficient = load_question("Q2_linear").linear_disutility
+    if utility is None or linear_coefficient is None or data.quadratic_disutility is None:
+        raise ValueError("The comparison requires the supplied Q1 and Q2 disutility parameters.")
+
+    rows: list[dict[str, str | float]] = []
+    all_runs: dict[str, dict[str, Results]] = {}
+    for profile_name, prices in profiles.items():
+        scenario = replace(data, energy_price=prices)
+        model_data = {
+            "Q1 utility": replace(
+                scenario,
+                consumption_utility=utility,
+                linear_disutility=None,
+                quadratic_disutility=None,
+            ),
+            "Q2 linear": replace(
+                scenario,
+                consumption_utility=None,
+                linear_disutility=linear_coefficient,
+                quadratic_disutility=None,
+            ),
+            "Q2 quadratic": replace(
+                scenario,
+                consumption_utility=None,
+                linear_disutility=None,
+            ),
+            "Q2 temporal": replace(
+                scenario,
+                consumption_utility=None,
+                linear_disutility=None,
+                quadratic_disutility=None,
+            ),
+        }
+        profile_runs: dict[str, Results] = {}
+        for label, model_input in model_data.items():
+            if label == "Q2 temporal":
+                model = FlexibleConsumerModel(
+                    model_input,
+                    temporal_disutility=temporal_disutility,
+                    temporal_window_hours=temporal_window_hours,
+                )
+            else:
+                model = FlexibleConsumerModel(model_input)
+            result = model.build().solve()
+            profile_runs[label] = result
+            rows.append({
+                "price_profile": profile_name,
+                "model": label,
+                "daily_net_surplus_DKK": float(result.daily_metrics["daily_net_surplus_DKK"]),
+                "daily_procurement_cost_DKK": float(result.daily_metrics["daily_procurement_cost_DKK"]),
+                "total_disutility_DKK": float(result.daily_metrics["total_disutility_DKK"]),
+                "daily_energy_consumed_kWh": float(result.daily_metrics["daily_energy_consumed_kWh"]),
+                "total_absolute_deviation_kWh": float(result.daily_metrics["total_absolute_deviation_kWh"]),
+            })
+        all_runs[profile_name] = profile_runs
+
+    return pd.DataFrame(rows), profiles, all_runs
