@@ -109,6 +109,57 @@ def plot_scenario_comparison(
     return _finish(fig, save_to)
 
 
+def plot_temporal_schedules(
+    profiles: dict[str, np.ndarray],
+    runs: dict[str, dict[str, Results]],
+    save_to: Path | str | None = None,
+) -> plt.Figure:
+    """Plot matched price profiles and resulting schedules for all preference models."""
+    fig, axes = plt.subplots(2, 2, figsize=(12, 7), sharex="col")
+    for column, (profile_name, prices) in enumerate(profiles.items()):
+        hours = np.arange(len(prices))
+        axes[0, column].step(hours, prices, where="mid", color="black", label="energy price")
+        axes[0, column].set(title=f"{profile_name.title()} prices", ylabel="DKK/kWh")
+        axes[0, column].grid(alpha=0.2)
+
+        for label, result in runs[profile_name].items():
+            axes[1, column].plot(hours, result.hourly["load"], marker=".", label=label)
+        reference = next(iter(runs[profile_name].values())).hourly["reference_load"]
+        axes[1, column].step(hours, reference, where="mid", color="black", linestyle="--", label="reference")
+        axes[1, column].set(xlabel="hour", ylabel="load (kWh/h)")
+        axes[1, column].grid(alpha=0.2)
+    axes[0, 0].legend(fontsize=8)
+    axes[1, 1].legend(fontsize=8)
+    fig.suptitle("Price ordering and optimal load schedules")
+    return _finish(fig, save_to)
+
+
+def plot_temporal_metrics(summary, save_to: Path | str | None = None) -> plt.Figure:
+    """Compare net objective-derived value and total absolute deviation by profile/model."""
+    profiles = list(summary["price_profile"].drop_duplicates())
+    models = list(summary["model"].drop_duplicates())
+    x = np.arange(len(profiles))
+    width = 0.8 / len(models)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+    for axis, metric, ylabel, title in (
+        (axes[0], "daily_net_surplus_DKK", "DKK", "Net surplus / objective-derived value"),
+        (axes[1], "total_absolute_deviation_kWh", "kWh", "Total absolute deviation"),
+    ):
+        for index, model in enumerate(models):
+            values = [
+                summary.loc[
+                    (summary["price_profile"] == profile) & (summary["model"] == model), metric
+                ].iloc[0]
+                for profile in profiles
+            ]
+            offset = (index - (len(models) - 1) / 2) * width
+            axis.bar(x + offset, values, width, label=model)
+        axis.set(xticks=x, xticklabels=[profile.title() for profile in profiles], ylabel=ylabel, title=title)
+        axis.grid(axis="y", alpha=0.2)
+    axes[0].legend(fontsize=8)
+    
+
 def plot_load_scenarios(
     runs: dict[str, Results], save_to: Path | str | None = None, title: str = "Actual load for sensitivity scenarios"
 ) -> plt.Figure:
