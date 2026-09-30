@@ -118,7 +118,11 @@ def sweep_quadratic_disutility(
     coefficients: list[float] | np.ndarray,
     plot_path: Path | str | None = None,
 ) -> pd.DataFrame:
-    """Solve Q2 for each quadratic disutility coefficient and return a summary table."""
+    """Solve Q2 or Q3 for each quadratic disutility coefficient and return a summary table.
+
+    Everything else in ``data`` is kept unchanged. If the data has a minimum daily energy
+    requirement (Q3), the constraint stays in the model and its dual is added to the table.
+    """
     if data.reference_load is None:
         raise ValueError("The quadratic disutility sweep requires a reference load profile.")
 
@@ -132,14 +136,18 @@ def sweep_quadratic_disutility(
         results = FlexibleConsumerModel(scenario).build().solve()
         runs[f"c_Q={coefficient:g}"] = results
         metrics = results.daily_metrics
-        rows.append({
+        row = {
             "c_Q_DKK_per_kWh2": coefficient,
             "daily_procurement_cost_DKK": float(metrics["daily_procurement_cost_DKK"]),
             "total_disutility_DKK": float(metrics["total_disutility_DKK"]),
             "daily_energy_consumed_kWh": float(metrics["daily_energy_consumed_kWh"]),
             "total_absolute_deviation_kWh": float(metrics["total_absolute_deviation_kWh"]),
             "load_breakpoint_hours": int(metrics["load_bound_binding_hours"]),
-        })
+        }
+        if "daily_energy_min" in results.duals:
+            row["objective_DKK"] = float(results.objective)
+            row["daily_energy_min_dual_DKK_per_kWh"] = float(results.duals["daily_energy_min"])
+        rows.append(row)
     if plot_path is not None:
         plot_scenario_comparison(runs, save_to=plot_path)
     return pd.DataFrame(rows)
