@@ -91,19 +91,27 @@ def plot_duals(results: Results, data: InputData, save_to: Path | str | None = N
 
 
 def plot_scenario_comparison(
-    runs: dict[str, Results], metric: str = "objective", save_to: Path | str | None = None
+    runs: dict[str, Results] | None = None,
+    metric: str = "objective",
+    save_to: Path | str | None = None,
+    values: dict[str, float] | None = None,
+    ylabel: str | None = None,
 ) -> plt.Figure:
     """Bar chart of one metric across scenarios. ``metric`` is ``"objective"`` or the name of an
-    hourly column whose daily sum is compared (e.g. ``"import"``, ``"export"``, ``"load"``)."""
-    names = list(runs)
-    if metric == "objective":
-        values = [r.objective for r in runs.values()]
-        ylabel = "daily cost [DKK]"
+    hourly column whose daily sum is compared (e.g. ``"import"``, ``"export"``, ``"load"``).
+    Alternatively pass precomputed ``values`` (scenario name -> number) and a ``ylabel``."""
+    if values is not None:
+        names, bars = list(values), list(values.values())
     else:
-        values = [r.hourly[metric].sum() for r in runs.values()]
-        ylabel = f"daily {metric} [kWh]"
+        names = list(runs)
+        if metric == "objective":
+            bars = [r.objective for r in runs.values()]
+            ylabel = "daily cost [DKK]"
+        else:
+            bars = [r.hourly[metric].sum() for r in runs.values()]
+            ylabel = f"daily {metric} [kWh]"
     fig, ax = plt.subplots(figsize=(max(5, 1.2 * len(names)), 3.8))
-    ax.bar(names, values, color="C0")
+    ax.bar(names, bars, color="C0")
     ax.set(ylabel=ylabel, title=f"Scenario comparison - {metric}")
     ax.tick_params(axis="x", rotation=20)
     return _finish(fig, save_to)
@@ -196,4 +204,32 @@ def plot_load_scenarios(
     lines, labels = ax.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax.legend(lines + lines2, labels + labels2, fontsize=8, ncol=2)
+    return _finish(fig, save_to)
+
+
+def plot_battery_comparison(base: Results, with_battery: Results, data: InputData,
+                            save_to: Path | str | None = None) -> plt.Figure:
+    """Net grid exchange without/with battery, plus battery power and SoC."""
+    h = base.hourly.index.to_numpy()
+    b, w = base.hourly, with_battery.hourly
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6.5), sharex=True)
+
+    ax = axes[0]
+    ax.step(h, b["import"] - b["export"], where="mid", color="C0", label="no battery")
+    ax.step(h, w["import"] - w["export"], where="mid", color="C3", label="with battery")
+    ax2 = ax.twinx()
+    ax2.step(h, data.energy_price, where="mid", color="gray", ls="--", label="price")
+    ax2.set_ylabel("price, DKK/kWh")
+    ax.set(ylabel="net import, kWh/h", title="Grid exchange")
+    ax.legend(fontsize=8, loc="upper left")
+
+    ax = axes[1]
+    ax.bar(h, w["battery_charge"], 0.8, color="C2", label="charge")
+    ax.bar(h, -w["battery_discharge"], 0.8, color="C1", label="discharge")
+    ax3 = ax.twinx()
+    ax3.plot(h, w["soc"], color="k", label="SoC (end of hour)")
+    ax3.set_ylabel("SoC, kWh")
+    ax.set(xlabel="hour", ylabel="kWh/h", title="Battery")
+    ax.legend(fontsize=8, loc="upper left")
+    ax3.legend(fontsize=8, loc="upper right")
     return _finish(fig, save_to)

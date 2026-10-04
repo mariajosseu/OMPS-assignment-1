@@ -123,6 +123,15 @@ class FlexibleConsumerModel:
         if is_temporal:
             self.var["rolling_deviation"] = m.addVars(T, lb=0, name="rolling_deviation")
 
+        has_battery = d.battery_capacity_kWh is not None
+        if has_battery:
+            self.var["battery_charge"] = m.addVars(T, lb=-GRB.INFINITY, name="battery_charge")
+            self.var["battery_discharge"] = m.addVars(T, lb=-GRB.INFINITY, name="battery_discharge")
+            self.var["soc"] = m.addVars(T, lb=-GRB.INFINITY, name="soc")   # SoC at the end of hour t
+            charge, discharge = self.var["battery_charge"], self.var["battery_discharge"]
+        else:
+            charge = discharge = {t: 0 for t in T}
+
         # --- Objective ---------------------------------------------------------------
         load = self.var["load"]
         pv = self.var["pv"]
@@ -154,7 +163,8 @@ class FlexibleConsumerModel:
 
         # --- Constraints -------------------------------------------------------------
         self.con["balance"] = m.addConstrs(
-            (pv[t] + imported[t] == load[t] + exported[t] for t in T), name="balance"
+            (pv[t] + imported[t] + discharge[t] == load[t] + exported[t] + charge[t] for t in T),
+            name="balance",
         )
         self.con["load_min"] = m.addConstrs(
             (load[t] >= d.load_min_kWh for t in T), name="load_min"
@@ -208,6 +218,29 @@ class FlexibleConsumerModel:
                 ),
                 name="rolling_deviation_definition",
             )
+
+        if has_battery:
+            soc = self.var["soc"]
+            self.con["soc_dynamics"] = m.addConstrs(
+                (
+                    soc[t] == (d.battery_initial_soc_kWh if t == 0 else soc[t - 1])
+                    + d.battery_charging_efficiency * charge[t]
+                    - discharge[t] / d.battery_discharging_efficiency
+                    for t in T
+                ),
+                name="soc_dynamics",
+            )
+            self.con["soc_min"] = m.addConstrs((soc[t] >= 0 for t in T), name="soc_min")
+            self.con["soc_max"] = m.addConstrs((soc[t] <= d.battery_capacity_kWh for t in T), name="soc_max")
+            self.con["charge_min"] = m.addConstrs((charge[t] >= 0 for t in T), name="charge_min")
+            self.con["charge_max"] = m.addConstrs((charge[t] <= d.battery_max_charge_kW for t in T), name="charge_max")
+            self.con["discharge_min"] = m.addConstrs((discharge[t] >= 0 for t in T), name="discharge_min")
+            self.con["discharge_max"] = m.addConstrs(
+                (discharge[t] <= d.battery_max_discharge_kW for t in T), name="discharge_max"
+            )
+            # End of horizon: the battery must finish the day at least as full as it started (default).
+            final_soc = d.battery_initial_soc_kWh if d.battery_final_soc_kWh is None else d.battery_final_soc_kWh
+            self.con["soc_terminal"] = m.addConstr(soc[self.T[-1]] >= final_soc, name="soc_terminal")
 
         m.update()
         return self
@@ -295,7 +328,17 @@ class FlexibleConsumerModel:
         )
         daily_energy = float(hourly["load"].sum())
         daily_utility = float(d.consumption_utility * daily_energy) if d.consumption_utility is not None else 0.0
+        battery_metrics: dict[str, object] = {}
+        if "battery_charge" in hourly:
+            both = (hourly["battery_charge"] > 1e-7) & (hourly["battery_discharge"] > 1e-7)
+            battery_metrics = {
+                "battery_charged_kWh": float(hourly["battery_charge"].sum()),
+                "battery_discharged_kWh": float(hourly["battery_discharge"].sum()),
+                "battery_simultaneous_hours": int(both.sum()),
+                "battery_final_soc_kWh": float(hourly["soc"].iloc[-1]),
+            }
         return {
+            **battery_metrics,
             "daily_procurement_cost_DKK": procurement_cost,
             "total_disutility_DKK": total_disutility,
             "daily_net_surplus_DKK": daily_utility - procurement_cost - total_disutility,

@@ -18,13 +18,18 @@ from src.data_loader import load_question, list_questions
 
 from src.model import FlexibleConsumerModel, Results
 from src.plotting import (
+    plot_battery_comparison,
+    plot_scenario_comparison,
     plot_duals,
     plot_inputs,
+    plot_load_scenarios,
     plot_schedule,
     plot_temporal_metrics,
     plot_temporal_schedules,
 )
 from src.scenarios import (
+    compare_battery,
+    sweep_battery_value,
     compare_temporal_price_profiles,
     sweep_linear_disutility,
     sweep_quadratic_disutility,
@@ -120,6 +125,16 @@ def main() -> None:
         metavar="HOURS",
         help="Q2(e) rolling window length (default: 3)",
     )
+    parser.add_argument(
+        "--battery-comparison",
+        action="store_true",
+        help="Q3(g): compare Q3_battery with the same consumer without its battery",
+    )
+    parser.add_argument(
+        "--battery-sweep",
+        action="store_true",
+        help="Q3(g.v): sweep environment and battery parameters and report the battery value",
+    )
     parser.add_argument("--show", action="store_true", help="open the figures in a window")
     args = parser.parse_args()
 
@@ -160,6 +175,33 @@ def main() -> None:
             temporal_disutility=args.q2e_coefficient,
             temporal_window_hours=args.q2e_window_hours,
         )
+    if args.battery_comparison:
+        if args.question != "Q3_battery":
+            parser.error("--battery-comparison requires --question Q3_battery")
+        data = load_question(args.question)
+        summary, no_bat, bat = compare_battery(data)
+        summary.to_csv(out / "battery_comparison.csv", index=False)
+        (out / "battery_comparison.tex").write_text(summary.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
+        plot_battery_comparison(no_bat, bat, data, save_to=out / "battery_comparison.png")
+        plot_load_scenarios({"no battery": no_bat, "with battery": bat},
+                            save_to=out / "battery_load_comparison.png",
+                            title="Actual load with and without the battery")
+        print("\nBattery comparison:\n", summary.T.to_string(header=False))
+        print(f"Value of the battery: {summary.net_utility_DKK[1] - summary.net_utility_DKK[0]:.3f} DKK/day")
+    if args.battery_sweep:
+        if args.question != "Q3_battery":
+            parser.error("--battery-sweep requires --question Q3_battery")
+        sweep = sweep_battery_value(load_question(args.question))
+        sweep.to_csv(out / "battery_value_sweep.csv", index=False)
+        (out / "battery_value_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
+        for parameter, group in sweep.groupby("parameter", sort=False):
+            plot_scenario_comparison(
+                values={f"{v:g}": x for v, x in zip(group["value"], group["battery_value_DKK"])},
+                metric=f"battery value vs {parameter}",
+                ylabel="battery value [DKK/day]",
+                save_to=out / f"battery_value_{parameter}.png",
+            )
+        print("\nBattery value sweeps:\n", sweep.to_string(index=False))
     print(f"\nOutputs written to {out}")
 
 
