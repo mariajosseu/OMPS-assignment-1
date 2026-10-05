@@ -77,6 +77,18 @@ def set_load_preferences(
     )
 
 
+def set_quadratic_disutility(data: InputData, coefficient: float) -> InputData:
+    """Return a scenario with quadratic disutility coefficient ``coefficient``."""
+    if not np.isfinite(coefficient) or coefficient <= 0:
+        raise ValueError("Quadratic disutility coefficient must be finite and positive.")
+    return replace(data, quadratic_disutility=float(coefficient))
+
+
+def drop_min_energy(data: InputData) -> InputData:
+    """Return the same scenario without its minimum daily energy constraint."""
+    return replace(data, min_daily_energy_kWh=None)
+
+
 def sweep_linear_disutility(
     data: InputData,
     coefficients: list[float] | np.ndarray,
