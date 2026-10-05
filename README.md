@@ -88,6 +88,7 @@ python main.py --question Q1_caseA              # base case
 python main.py --question Q1_caseA --scenarios  # + example sensitivity scenarios
 python main.py --question Q2_linear --linear-sweep 0.0 0.5 1.0 1.43 2.0 3.0
 python main.py --question Q2_quadratic --q2e-experiment
+python main.py --question Q3 --emin-sweep 0 10 20 30 40 50 60
 python main.py --show                           # open the interactive figures in a browser
 ```
 
@@ -127,13 +128,19 @@ procurement cost, total disutility, daily energy consumption, total absolute dev
 the number of hours at the load breakpoints. Here, load breakpoints mean the supplied hourly
 minimum or maximum load bounds; no separate deviation bound is present in the input data.
 
+For the Question 3 minimum-energy sensitivity analysis, pass the desired ``E_min`` values with
+``--emin-sweep``. The command writes ``results/Q3/emin_sweep.csv`` and
+``results/Q3/emin_sweep.tex`` with daily energy consumed, objective, procurement cost, quadratic
+disutility, and the dual value of the minimum daily energy constraint. It also saves an hourly
+scenario comparison plot.
+
 **Implemented model coverage.** `FlexibleConsumerModel.build()` in `src/model.py` contains the
 hourly formulations used by Question 1, Question 2(b) linear disutility, Question 2(c) quadratic
 disutility, and the optional Question 2(e) temporal quadratic disutility. For Question 2,
 the auxiliary `deviation` variable represents the absolute deviation from the supplied reference
 profile through two linear inequalities and a non-negativity constraint. The solved `Results` object
-contains the full hourly primal solution and daily metrics. The repository still expects you to
-extend or subclass the model for Question 3 and the remaining assignment questions.
+contains the full hourly primal solution and daily metrics. The model also supports the Question 3
+minimum daily energy constraint and its sensitivity analysis. The battery extension remains a modeling task.
 Everything downstream (solving, extraction of primal and dual values, saving, plotting) already works.
 
 **Conventions that make the primal and dual values come out for free**
