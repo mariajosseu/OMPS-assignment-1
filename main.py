@@ -13,6 +13,7 @@ import argparse
 from pathlib import Path
 
 import matplotlib
+import pandas as pd
 
 from src.data_loader import load_question, list_questions
 
@@ -23,11 +24,13 @@ from src.plotting import (
     plot_schedule,
     plot_temporal_metrics,
     plot_temporal_schedules,
+    plot_scenario_comparison,
 )
 from src.scenarios import (
     compare_temporal_price_profiles,
     sweep_linear_disutility,
     sweep_quadratic_disutility,
+    set_load_preferences,
 )
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -99,7 +102,7 @@ def main() -> None:
         nargs="+",
         type=float,
         metavar="c_Q",
-        help="solve Q2_quadratic for the supplied c_Q values and save quadratic_sweep.csv",
+        help="solve Q2_quadratic or Q3 (with the E_min constraint) for the supplied c_Q values and save quadratic_sweep.csv",
     )
     parser.add_argument(
         "--q2e-experiment",
@@ -119,6 +122,13 @@ def main() -> None:
         default=3,
         metavar="HOURS",
         help="Q2(e) rolling window length (default: 3)",
+    )
+    parser.add_argument(
+        "--emin-sweep",
+        nargs="+",
+        type=float,
+        metavar="E_MIN",
+        help="solve Q3 for the supplied minimum daily energy values and save emin_sweep.csv",
     )
     parser.add_argument("--show", action="store_true", help="open the figures in a window")
     args = parser.parse_args()
@@ -141,8 +151,8 @@ def main() -> None:
         (out / "linear_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
         print("\nLinear disutility sweep:\n", sweep.to_string(index=False))
     if args.quadratic_sweep is not None:
-        if args.question != "Q2_quadratic":
-            parser.error("--quadratic-sweep requires --question Q2_quadratic")
+        if args.question not in ("Q2_quadratic", "Q3"):
+            parser.error("--quadratic-sweep requires --question Q2_quadratic or Q3")
         sweep = sweep_quadratic_disutility(
             load_question(args.question),
             args.quadratic_sweep,
@@ -160,6 +170,32 @@ def main() -> None:
             temporal_disutility=args.q2e_coefficient,
             temporal_window_hours=args.q2e_window_hours,
         )
+    if args.emin_sweep is not None:
+        if args.question != "Q3":
+            parser.error("--emin-sweep requires --question Q3")
+        data = load_question(args.question)
+        rows = []
+        runs = {}
+        for minimum_energy in args.emin_sweep:
+            if minimum_energy < 0:
+                parser.error("--emin-sweep values must be non-negative")
+            scenario = set_load_preferences(data, min_daily_energy_kWh=minimum_energy)
+            results = FlexibleConsumerModel(scenario).build().solve()
+            runs[f"E_min={minimum_energy:g}"] = results
+            metrics = results.daily_metrics
+            rows.append({
+                "E_min_kWh": minimum_energy,
+                "daily_energy_consumed_kWh": float(metrics["daily_energy_consumed_kWh"]),
+                "objective_DKK": float(results.objective),
+                "daily_procurement_cost_DKK": float(metrics["daily_procurement_cost_DKK"]),
+                "total_disutility_DKK": float(metrics["total_disutility_DKK"]),
+                "daily_energy_min_dual_DKK_per_kWh": float(results.duals["daily_energy_min"]),
+            })
+        sweep = pd.DataFrame(rows)
+        sweep.to_csv(out / "emin_sweep.csv", index=False)
+        (out / "emin_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
+        plot_scenario_comparison(runs, save_to=out / "emin_sweep_comparison.png")
+        print("\nMinimum daily energy sweep:\n", sweep.to_string(index=False))
     print(f"\nOutputs written to {out}")
 
 
