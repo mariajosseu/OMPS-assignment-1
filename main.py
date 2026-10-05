@@ -18,9 +18,15 @@ import pandas as pd
 from src.data_loader import load_question, list_questions
 
 from src.model import FlexibleConsumerModel, Results
-from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule
+from src.plotting import (
+    plot_duals,
+    plot_inputs,
+    plot_schedule,
+    plot_temporal_metrics,
+    plot_temporal_schedules,
+)
 from src.scenarios import (
-    set_load_preferences,
+    compare_temporal_price_profiles,
     sweep_linear_disutility,
     sweep_quadratic_disutility,
 )
@@ -49,6 +55,35 @@ def run_base_case(question: str, out: Path, show: bool) -> Results | None:
     return results
 
 
+def run_q2e_experiment(
+    data,
+    out: Path,
+    temporal_disutility: float,
+    temporal_window_hours: int,
+) -> None:
+    """Solve the Q2(e) base case and save the matched temporal-price experiment."""
+    result = FlexibleConsumerModel(
+        data,
+        temporal_disutility=temporal_disutility,
+        temporal_window_hours=temporal_window_hours,
+    ).build().solve()
+    result.save(out, tag="Q2e_base")
+    plot_schedule(result, data, save_to=out / "Q2e_schedule.png")
+
+    summary, profiles, runs = compare_temporal_price_profiles(
+        data,
+        temporal_disutility=temporal_disutility,
+        temporal_window_hours=temporal_window_hours,
+    )
+    summary.to_csv(out / "Q2e_temporal_price_comparison.csv", index=False)
+    (out / "Q2e_temporal_price_comparison.tex").write_text(
+        summary.to_latex(index=False, float_format="%.3f"), encoding="utf-8"
+    )
+    plot_temporal_schedules(profiles, runs, save_to=out / "Q2e_temporal_schedules.png")
+    plot_temporal_metrics(summary, save_to=out / "Q2e_temporal_metrics.png")
+    print("\nQ2(e) temporal price comparison:\n", summary.to_string(index=False))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--question", default="Q1_caseA", choices=list_questions(), help="data case to use")
@@ -65,14 +100,26 @@ def main() -> None:
         nargs="+",
         type=float,
         metavar="c_Q",
-        help="solve Q2_quadratic or Q3 (with the E_min constraint) for the supplied c_Q values and save quadratic_sweep.csv",
+        help="solve Q2_quadratic for the supplied c_Q values and save quadratic_sweep.csv",
     )
     parser.add_argument(
-        "--emin-sweep",
-        nargs="+",
+        "--q2e-experiment",
+        action="store_true",
+        help="run the Q2(e) base case and matched alternating/block price experiment",
+    )
+    parser.add_argument(
+        "--q2e-coefficient",
         type=float,
-        metavar="E_MIN",
-        help="solve Q3 for the supplied minimum daily energy values and save emin_sweep.csv",
+        default=0.1,
+        metavar="KAPPA",
+        help="Q2(e) rolling-deviation penalty in DKK/kWh^2 (default: 0.1)",
+    )
+    parser.add_argument(
+        "--q2e-window-hours",
+        type=int,
+        default=3,
+        metavar="HOURS",
+        help="Q2(e) rolling window length (default: 3)",
     )
     parser.add_argument("--show", action="store_true", help="open the figures in a window")
     args = parser.parse_args()
@@ -105,32 +152,15 @@ def main() -> None:
         sweep.to_csv(out / "quadratic_sweep.csv", index=False)
         (out / "quadratic_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
         print("\nQuadratic disutility sweep:\n", sweep.to_string(index=False))
-    if args.emin_sweep is not None:
-        if args.question != "Q3":
-            parser.error("--emin-sweep requires --question Q3")
-        data = load_question(args.question)
-        rows = []
-        runs = {}
-        for minimum_energy in args.emin_sweep:
-            if minimum_energy < 0:
-                parser.error("--emin-sweep values must be non-negative")
-            scenario = set_load_preferences(data, min_daily_energy_kWh=minimum_energy)
-            results = FlexibleConsumerModel(scenario).build().solve()
-            runs[f"E_min={minimum_energy:g}"] = results
-            metrics = results.daily_metrics
-            rows.append({
-                "E_min_kWh": minimum_energy,
-                "daily_energy_consumed_kWh": float(metrics["daily_energy_consumed_kWh"]),
-                "objective_DKK": float(results.objective),
-                "daily_procurement_cost_DKK": float(metrics["daily_procurement_cost_DKK"]),
-                "total_disutility_DKK": float(metrics["total_disutility_DKK"]),
-                "daily_energy_min_dual_DKK_per_kWh": float(results.duals["daily_energy_min"]),
-            })
-        sweep = pd.DataFrame(rows)
-        sweep.to_csv(out / "emin_sweep.csv", index=False)
-        (out / "emin_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
-        plot_scenario_comparison(runs, save_to=out / "emin_sweep_comparison.png")
-        print("\nMinimum daily energy sweep:\n", sweep.to_string(index=False))
+    if args.q2e_experiment:
+        if args.question != "Q2_quadratic":
+            parser.error("--q2e-experiment requires --question Q2_quadratic")
+        run_q2e_experiment(
+            load_question(args.question),
+            out,
+            temporal_disutility=args.q2e_coefficient,
+            temporal_window_hours=args.q2e_window_hours,
+        )
     print(f"\nOutputs written to {out}")
 
 
