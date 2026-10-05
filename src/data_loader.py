@@ -77,8 +77,8 @@ class InputData:
     battery_charging_efficiency: float | None = None      # fraction of charged energy reaching the battery
     battery_discharging_efficiency: float | None = None   # fraction of discharged energy reaching the consumer
     battery_initial_soc_kWh: float | None = None          # state of charge at the start of the day
-    battery_final_soc_kWh: float | None = None            # None ON PURPOSE: the end-of-horizon treatment is
-                                                          # your modeling choice (Question 3.(g))
+    battery_final_soc_kWh: float | None = None            # terminal SoC lower bound; None = return to the initial SoC
+                                                          # (end-of-horizon choice of Question 3.(g))
 
     # Next-day forecasts (for exploring the end-of-horizon choice of Question 3.(g))
     energy_price_next_day: np.ndarray | None = None       # DKK/kWh, 24 values for the following day
