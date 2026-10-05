@@ -13,7 +13,6 @@ import argparse
 from pathlib import Path
 
 import matplotlib
-import pandas as pd
 
 from src.data_loader import load_question, list_questions
 
@@ -142,8 +141,8 @@ def main() -> None:
         (out / "linear_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
         print("\nLinear disutility sweep:\n", sweep.to_string(index=False))
     if args.quadratic_sweep is not None:
-        if args.question not in ("Q2_quadratic", "Q3"):
-            parser.error("--quadratic-sweep requires --question Q2_quadratic or Q3")
+        if args.question != "Q2_quadratic":
+            parser.error("--quadratic-sweep requires --question Q2_quadratic")
         sweep = sweep_quadratic_disutility(
             load_question(args.question),
             args.quadratic_sweep,

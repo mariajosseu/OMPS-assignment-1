@@ -87,6 +87,7 @@ experiment in `main.py`.
 python main.py --question Q1_caseA              # base case
 python main.py --question Q1_caseA --scenarios  # + example sensitivity scenarios
 python main.py --question Q2_linear --linear-sweep 0.0 0.5 1.0 1.43 2.0 3.0
+python main.py --question Q2_quadratic --q2e-experiment
 python main.py --show                           # open the interactive figures in a browser
 ```
 
@@ -125,12 +126,6 @@ For the Question 2 linear-disutility sensitivity analysis, pass the desired valu
 procurement cost, total disutility, daily energy consumption, total absolute deviation, and
 the number of hours at the load breakpoints. Here, load breakpoints mean the supplied hourly
 minimum or maximum load bounds; no separate deviation bound is present in the input data.
-
-For the Question 3 minimum-energy sensitivity analysis, pass the desired ``E_min`` values with
-``--emin-sweep``. The command writes ``results/Q3/emin_sweep.csv`` and
-``results/Q3/emin_sweep.tex`` with daily energy consumed, objective, procurement cost, quadratic
-disutility, and the dual value of the minimum daily energy constraint. It also saves an hourly
-scenario comparison plot.
 
 **Implemented model coverage.** `FlexibleConsumerModel.build()` in `src/model.py` contains the
 hourly formulations used by Question 1, Question 2(b) linear disutility, Question 2(c) quadratic
