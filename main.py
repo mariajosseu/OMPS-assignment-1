@@ -32,9 +32,10 @@ from src.scenarios import (
     compare_battery,
     sweep_battery_value,
     compare_temporal_price_profiles,
+    scale_prices,
+    set_load_preferences,
     sweep_linear_disutility,
     sweep_quadratic_disutility,
-    set_load_preferences,
 )
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -143,6 +144,14 @@ def main() -> None:
         type=float,
         metavar="E_MIN",
         help="solve Q3 for the supplied minimum daily energy values and save emin_sweep.csv",
+
+    )
+    parser.add_argument(
+        "--spread-sweep",
+        nargs="+",
+        type=float,
+        metavar="ALPHA",
+        help="solve Q3 for the supplied price-spread factors (mean-preserving) and save spread_sweep.csv",
     )
     parser.add_argument("--show", action="store_true", help="open the figures in a window")
     args = parser.parse_args()
@@ -238,6 +247,38 @@ def main() -> None:
         plot_scenario_comparison(runs, save_to=out / "emin_sweep_comparison.png")
         print("\nMinimum daily energy sweep:\n", sweep.to_string(index=False))
     print(f"\nOutputs written to {out}")
+    if args.spread_sweep is not None:
+        if args.question != "Q3":
+            parser.error("--spread-sweep requires --question Q3")
+        data = load_question(args.question)
+        rows = []
+        runs = {}
+        for alpha in args.spread_sweep:
+            if alpha < 0:
+                parser.error("--spread-sweep values must be non-negative")
+            scenario = scale_prices(data, factor=alpha, keep_mean=True)
+            results = FlexibleConsumerModel(scenario).build().solve()
+            runs[f"alpha={alpha:g}"] = results
+            metrics = results.daily_metrics
+            p = scenario.energy_price
+            rows.append({
+                "alpha": alpha,
+                "price_min_DKK_per_kWh": float(p.min()),
+                "price_max_DKK_per_kWh": float(p.max()),
+                "price_std_DKK_per_kWh": float(p.std()),
+                "daily_energy_consumed_kWh": float(metrics["daily_energy_consumed_kWh"]),
+                "objective_DKK": float(results.objective),
+                "daily_procurement_cost_DKK": float(metrics["daily_procurement_cost_DKK"]),
+                "total_disutility_DKK": float(metrics["total_disutility_DKK"]),
+                "total_absolute_deviation_kWh": float(metrics["total_absolute_deviation_kWh"]),
+                "load_breakpoint_hours": int(metrics["load_bound_binding_hours"]),
+                "daily_energy_min_dual_DKK_per_kWh": float(results.duals["daily_energy_min"]),
+            })
+        sweep = pd.DataFrame(rows)
+        sweep.to_csv(out / "spread_sweep.csv", index=False)
+        (out / "spread_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
+        plot_scenario_comparison(runs, save_to=out / "spread_sweep_comparison.png")
+        print("\nPrice spread sweep:\n", sweep.to_string(index=False))
 
 
 if __name__ == "__main__":
