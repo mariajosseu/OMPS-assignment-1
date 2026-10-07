@@ -89,6 +89,8 @@ python main.py --question Q1_caseA --scenarios  # + example sensitivity scenario
 python main.py --question Q2_linear --linear-sweep 0.0 0.5 1.0 1.43 2.0 3.0
 python main.py --question Q2_quadratic --q2e-experiment
 python main.py --question Q3 --emin-sweep 0 10 20 30 40 50 60
+python main.py --question Q3 --quadratic-sweep 0.1 0.5 1.0
+python main.py --question Q3 --spread-sweep 0 0.5 1 1.5 2
 python main.py --show                           # open the interactive figures in a browser
 ```
 
