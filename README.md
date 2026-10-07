@@ -87,8 +87,22 @@ experiment in `main.py`.
 python main.py --question Q1_caseA              # base case
 python main.py --question Q1_caseA --scenarios  # + example sensitivity scenarios
 python main.py --question Q2_linear --linear-sweep 0.0 0.5 1.0 1.43 2.0 3.0
+python main.py --question Q2_quadratic --q2e-experiment
+python main.py --question Q3 --emin-sweep 0 10 20 30 40 50 60
+python main.py --question Q3 --compare-unconstrained
+python main.py --question Q3 --sensitivity
 python main.py --show                           # open the interactive figures in a browser
 ```
+
+The Question 2(e) command solves the rolling-window disutility base case and compares the
+Q1 constant-utility, Q2 linear-disutility, Q2 quadratic-disutility and Q2(e) temporal models.
+Its default temporal penalty is ``0.1 DKK/kWh^2`` over a three-hour trailing window; override
+these choices with ``--q2e-coefficient`` and ``--q2e-window-hours``. The alternating and block
+price profiles contain the same hourly price values, reordered to change their temporal pattern.
+The command writes the base schedule, a comparison table (CSV and LaTeX), and schedule/metric
+figures under ``results/Q2_quadratic/``. The reported net values follow each model's own objective;
+because the preference functions differ, interpret them alongside procurement cost and deviation,
+not as a common absolute utility scale.
 
 **Use it from a notebook or your own script** (run from the repository root):
 ```python
@@ -116,12 +130,25 @@ procurement cost, total disutility, daily energy consumption, total absolute dev
 the number of hours at the load breakpoints. Here, load breakpoints mean the supplied hourly
 minimum or maximum load bounds; no separate deviation bound is present in the input data.
 
+For the Question 3 minimum-energy sensitivity analysis, pass the desired ``E_min`` values with
+``--emin-sweep``. The command writes ``results/Q3/emin_sweep.csv`` and
+``results/Q3/emin_sweep.tex`` with daily energy consumed, objective, procurement cost, quadratic
+disutility, and the dual value of the minimum daily energy constraint. It also saves an hourly
+scenario comparison plot.
+
+Question 3(e) compares Q3 with its minimum-energy constraint against the unconstrained Q2(c)
+consumer using ``--compare-unconstrained``. Question 3(f)'s ``--sensitivity`` command sweeps
+``E_min``, the quadratic disutility coefficient ``c_Q``, and price spread at fixed mean price.
+It writes ``q3e_daily.csv/.tex``, ``q3e_hourly.csv``, ``q3e_comparison.png``, and
+``q3f_<sweep>.csv/.tex/.png`` under ``results/Q3/``.
+
 **Implemented model coverage.** `FlexibleConsumerModel.build()` in `src/model.py` contains the
-hourly linear formulation used by Question 1 and Question 2(b) linear disutility. For Question 2,
+hourly formulations used by Question 1, Question 2(b) linear disutility, Question 2(c) quadratic
+disutility, and the optional Question 2(e) temporal quadratic disutility. For Question 2,
 the auxiliary `deviation` variable represents the absolute deviation from the supplied reference
 profile through two linear inequalities and a non-negativity constraint. The solved `Results` object
-contains the full hourly primal solution and daily metrics. The repository still expects you to
-extend or subclass the model for the remaining questions.
+contains the full hourly primal solution and daily metrics. The project also includes the Q3(e)/(f)
+analyses and Q3(g) battery model and sensitivity workflows.
 Everything downstream (solving, extraction of primal and dual values, saving, plotting) already works.
 
 **Conventions that make the primal and dual values come out for free**

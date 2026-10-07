@@ -22,12 +22,27 @@ from src.data_loader import load_question, list_questions
 
 from src.model import FlexibleConsumerModel, Results
 from src.plotting import (
-    plot_duals, plot_inputs, plot_min_energy_comparison, plot_scenario_comparison, plot_schedule,
+    plot_battery_comparison,
+    plot_duals,
+    plot_inputs,
+    plot_load_scenarios,
+    plot_min_energy_comparison,
+    plot_scenario_comparison,
+    plot_schedule,
     plot_sensitivity,
+    plot_temporal_metrics,
+    plot_temporal_schedules,
 )
 from src.scenarios import (
-    drop_min_energy, scale_prices, set_load_preferences, set_quadratic_disutility,
-    sweep_linear_disutility, sweep_quadratic_disutility,
+    compare_battery,
+    sweep_battery_value,
+    compare_temporal_price_profiles,
+    drop_min_energy,
+    scale_prices,
+    sweep_linear_disutility,
+    sweep_quadratic_disutility,
+    set_load_preferences,
+    set_quadratic_disutility,
 )
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -84,7 +99,10 @@ def run_min_energy_comparison(question: str, out: Path, tol: float = 1e-6) -> pd
         daily[name] = {
             "E_min_kWh": data.min_daily_energy_kWh if name == "Q3_with_Emin" else None,
             "daily_energy_consumed_kWh": m["daily_energy_consumed_kWh"],
-            "energy_above_Emin_kWh": m["daily_energy_consumed_kWh"] - data.min_daily_energy_kWh,
+            "energy_above_Emin_kWh": (
+                m["daily_energy_consumed_kWh"] - data.min_daily_energy_kWh
+                if name == "Q3_with_Emin" else None
+            ),
             "mu_DKK_per_kWh": r.duals.get("daily_energy_min"),
             "daily_procurement_cost_DKK": m["daily_procurement_cost_DKK"],
             "total_disutility_DKK": m["total_disutility_DKK"],
@@ -210,6 +228,33 @@ def run_min_energy_sensitivity(question: str, out: Path) -> dict[str, pd.DataFra
             f"Sensitivity to the price spread, same mean (E_min = {data.min_daily_energy_kWh:g} kWh)",
         ),
     }
+def run_q2e_experiment(
+    data,
+    out: Path,
+    temporal_disutility: float,
+    temporal_window_hours: int,
+) -> None:
+    """Solve the Q2(e) base case and save the matched temporal-price experiment."""
+    result = FlexibleConsumerModel(
+        data,
+        temporal_disutility=temporal_disutility,
+        temporal_window_hours=temporal_window_hours,
+    ).build().solve()
+    result.save(out, tag="Q2e_base")
+    plot_schedule(result, data, save_to=out / "Q2e_schedule.png")
+
+    summary, profiles, runs = compare_temporal_price_profiles(
+        data,
+        temporal_disutility=temporal_disutility,
+        temporal_window_hours=temporal_window_hours,
+    )
+    summary.to_csv(out / "Q2e_temporal_price_comparison.csv", index=False)
+    (out / "Q2e_temporal_price_comparison.tex").write_text(
+        summary.to_latex(index=False, float_format="%.3f"), encoding="utf-8"
+    )
+    plot_temporal_schedules(profiles, runs, save_to=out / "Q2e_temporal_schedules.png")
+    plot_temporal_metrics(summary, save_to=out / "Q2e_temporal_metrics.png")
+    print("\nQ2(e) temporal price comparison:\n", summary.to_string(index=False))
 
 
 def main() -> None:
@@ -228,7 +273,43 @@ def main() -> None:
         nargs="+",
         type=float,
         metavar="c_Q",
-        help="solve Q2_quadratic for the supplied c_Q values and save quadratic_sweep.csv",
+        help="solve Q2_quadratic or Q3 (with the E_min constraint) for the supplied c_Q values and save quadratic_sweep.csv",
+    )
+    parser.add_argument(
+        "--q2e-experiment",
+        action="store_true",
+        help="run the Q2(e) base case and matched alternating/block price experiment",
+    )
+    parser.add_argument(
+        "--q2e-coefficient",
+        type=float,
+        default=0.1,
+        metavar="KAPPA",
+        help="Q2(e) rolling-deviation penalty in DKK/kWh^2 (default: 0.1)",
+    )
+    parser.add_argument(
+        "--q2e-window-hours",
+        type=int,
+        default=3,
+        metavar="HOURS",
+        help="Q2(e) rolling window length (default: 3)",
+    )
+    parser.add_argument(
+        "--battery-comparison",
+        action="store_true",
+        help="Q3(g): compare Q3_battery with the same consumer without its battery",
+    )
+    parser.add_argument(
+        "--battery-sweep",
+        action="store_true",
+        help="Q3(g.v): sweep environment and battery parameters and report the battery value",
+    )
+    parser.add_argument(
+        "--emin-sweep",
+        nargs="+",
+        type=float,
+        metavar="E_MIN",
+        help="solve Q3 for the supplied minimum daily energy values and save emin_sweep.csv",
     )
     parser.add_argument(
         "--compare-unconstrained",
@@ -261,8 +342,8 @@ def main() -> None:
         (out / "linear_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
         print("\nLinear disutility sweep:\n", sweep.to_string(index=False))
     if args.quadratic_sweep is not None:
-        if args.question != "Q2_quadratic":
-            parser.error("--quadratic-sweep requires --question Q2_quadratic")
+        if args.question not in ("Q2_quadratic", "Q3"):
+            parser.error("--quadratic-sweep requires --question Q2_quadratic or Q3")
         sweep = sweep_quadratic_disutility(
             load_question(args.question),
             args.quadratic_sweep,
@@ -279,6 +360,68 @@ def main() -> None:
         if args.question != "Q3":
             parser.error("--sensitivity requires --question Q3")
         run_min_energy_sensitivity(args.question, out)
+    if args.q2e_experiment:
+        if args.question != "Q2_quadratic":
+            parser.error("--q2e-experiment requires --question Q2_quadratic")
+        run_q2e_experiment(
+            load_question(args.question),
+            out,
+            temporal_disutility=args.q2e_coefficient,
+            temporal_window_hours=args.q2e_window_hours,
+        )
+    if args.battery_comparison:
+        if args.question != "Q3_battery":
+            parser.error("--battery-comparison requires --question Q3_battery")
+        data = load_question(args.question)
+        summary, no_bat, bat = compare_battery(data)
+        summary.to_csv(out / "battery_comparison.csv", index=False)
+        (out / "battery_comparison.tex").write_text(summary.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
+        plot_battery_comparison(no_bat, bat, data, save_to=out / "battery_comparison.png")
+        plot_load_scenarios({"no battery": no_bat, "with battery": bat},
+                            save_to=out / "battery_load_comparison.png",
+                            title="Actual load with and without the battery")
+        print("\nBattery comparison:\n", summary.T.to_string(header=False))
+        print(f"Value of the battery: {summary.net_utility_DKK[1] - summary.net_utility_DKK[0]:.3f} DKK/day")
+    if args.battery_sweep:
+        if args.question != "Q3_battery":
+            parser.error("--battery-sweep requires --question Q3_battery")
+        sweep = sweep_battery_value(load_question(args.question))
+        sweep.to_csv(out / "battery_value_sweep.csv", index=False)
+        (out / "battery_value_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
+        for parameter, group in sweep.groupby("parameter", sort=False):
+            plot_scenario_comparison(
+                values={f"{v:g}": x for v, x in zip(group["value"], group["battery_value_DKK"])},
+                metric=f"battery value vs {parameter}",
+                ylabel="battery value [DKK/day]",
+                save_to=out / f"battery_value_{parameter}.png",
+            )
+        print("\nBattery value sweeps:\n", sweep.to_string(index=False))
+    if args.emin_sweep is not None:
+        if args.question != "Q3":
+            parser.error("--emin-sweep requires --question Q3")
+        data = load_question(args.question)
+        rows = []
+        runs = {}
+        for minimum_energy in args.emin_sweep:
+            if minimum_energy < 0:
+                parser.error("--emin-sweep values must be non-negative")
+            scenario = set_load_preferences(data, min_daily_energy_kWh=minimum_energy)
+            results = FlexibleConsumerModel(scenario).build().solve()
+            runs[f"E_min={minimum_energy:g}"] = results
+            metrics = results.daily_metrics
+            rows.append({
+                "E_min_kWh": minimum_energy,
+                "daily_energy_consumed_kWh": float(metrics["daily_energy_consumed_kWh"]),
+                "objective_DKK": float(results.objective),
+                "daily_procurement_cost_DKK": float(metrics["daily_procurement_cost_DKK"]),
+                "total_disutility_DKK": float(metrics["total_disutility_DKK"]),
+                "daily_energy_min_dual_DKK_per_kWh": float(results.duals["daily_energy_min"]),
+            })
+        sweep = pd.DataFrame(rows)
+        sweep.to_csv(out / "emin_sweep.csv", index=False)
+        (out / "emin_sweep.tex").write_text(sweep.to_latex(index=False, float_format="%.3f"), encoding="utf-8")
+        plot_scenario_comparison(runs, save_to=out / "emin_sweep_comparison.png")
+        print("\nMinimum daily energy sweep:\n", sweep.to_string(index=False))
     print(f"\nOutputs written to {out}")
 
 

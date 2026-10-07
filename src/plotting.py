@@ -218,19 +218,145 @@ def plot_sensitivity(
 
 
 def plot_scenario_comparison(
-    runs: dict[str, Results], metric: str = "objective", save_to: Path | str | None = None
+    runs: dict[str, Results] | None = None,
+    metric: str = "objective",
+    save_to: Path | str | None = None,
+    values: dict[str, float] | None = None,
+    ylabel: str | None = None,
 ) -> plt.Figure:
     """Bar chart of one metric across scenarios. ``metric`` is ``"objective"`` or the name of an
-    hourly column whose daily sum is compared (e.g. ``"import"``, ``"export"``, ``"load"``)."""
-    names = list(runs)
-    if metric == "objective":
-        values = [r.objective for r in runs.values()]
-        ylabel = "daily cost [DKK]"
+    hourly column whose daily sum is compared (e.g. ``"import"``, ``"export"``, ``"load"``).
+    Alternatively pass precomputed ``values`` (scenario name -> number) and a ``ylabel``."""
+    if values is not None:
+        names, bars = list(values), list(values.values())
     else:
-        values = [r.hourly[metric].sum() for r in runs.values()]
-        ylabel = f"daily {metric} [kWh]"
+        names = list(runs)
+        if metric == "objective":
+            bars = [r.objective for r in runs.values()]
+            ylabel = "daily cost [DKK]"
+        else:
+            bars = [r.hourly[metric].sum() for r in runs.values()]
+            ylabel = f"daily {metric} [kWh]"
     fig, ax = plt.subplots(figsize=(max(5, 1.2 * len(names)), 3.8))
-    ax.bar(names, values, color="C0")
+    ax.bar(names, bars, color="C0")
     ax.set(ylabel=ylabel, title=f"Scenario comparison - {metric}")
     ax.tick_params(axis="x", rotation=20)
+    return _finish(fig, save_to)
+
+
+def plot_temporal_schedules(
+    profiles: dict[str, np.ndarray],
+    runs: dict[str, dict[str, Results]],
+    save_to: Path | str | None = None,
+) -> plt.Figure:
+    """Plot matched price profiles and resulting schedules for all preference models."""
+    fig, axes = plt.subplots(2, 2, figsize=(12, 7), sharex="col")
+    for column, (profile_name, prices) in enumerate(profiles.items()):
+        hours = np.arange(len(prices))
+        axes[0, column].step(hours, prices, where="mid", color="black", label="energy price")
+        axes[0, column].set(title=f"{profile_name.title()} prices", ylabel="DKK/kWh")
+        axes[0, column].grid(alpha=0.2)
+
+        for label, result in runs[profile_name].items():
+            axes[1, column].plot(hours, result.hourly["load"], marker=".", label=label)
+        reference = next(iter(runs[profile_name].values())).hourly["reference_load"]
+        axes[1, column].step(hours, reference, where="mid", color="black", linestyle="--", label="reference")
+        axes[1, column].set(xlabel="hour", ylabel="load (kWh/h)")
+        axes[1, column].grid(alpha=0.2)
+    axes[0, 0].legend(fontsize=8)
+    axes[1, 1].legend(fontsize=8)
+    fig.suptitle("Price ordering and optimal load schedules")
+    return _finish(fig, save_to)
+
+
+def plot_temporal_metrics(summary, save_to: Path | str | None = None) -> plt.Figure:
+    """Compare net objective-derived value and total absolute deviation by profile/model."""
+    profiles = list(summary["price_profile"].drop_duplicates())
+    models = list(summary["model"].drop_duplicates())
+    x = np.arange(len(profiles))
+    width = 0.8 / len(models)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+    for axis, metric, ylabel, title in (
+        (axes[0], "daily_net_surplus_DKK", "DKK", "Net surplus / objective-derived value"),
+        (axes[1], "total_absolute_deviation_kWh", "kWh", "Total absolute deviation"),
+    ):
+        for index, model in enumerate(models):
+            values = [
+                summary.loc[
+                    (summary["price_profile"] == profile) & (summary["model"] == model), metric
+                ].iloc[0]
+                for profile in profiles
+            ]
+            offset = (index - (len(models) - 1) / 2) * width
+            axis.bar(x + offset, values, width, label=model)
+        axis.set(xticks=x, xticklabels=[profile.title() for profile in profiles], ylabel=ylabel, title=title)
+        axis.grid(axis="y", alpha=0.2)
+    axes[0].legend(fontsize=8)
+
+
+def plot_load_scenarios(
+    runs: dict[str, Results], save_to: Path | str | None = None, title: str = "Actual load for sensitivity scenarios"
+) -> plt.Figure:
+    """Plot the hourly actual load and reference profile for each scenario."""
+    fig, ax = plt.subplots(figsize=(11, 4.2))
+    for name, results in runs.items():
+        hourly = results.hourly
+        ax.step(hourly.index, hourly["load"], where="mid", label=name)
+    first_hourly = next(iter(runs.values())).hourly
+    if "reference_load" in first_hourly:
+        ax.step(
+            first_hourly.index,
+            first_hourly["reference_load"],
+            where="mid",
+            color="black",
+            linestyle="--",
+            linewidth=1.5,
+            label="reference load",
+        )
+    ax2 = ax.twinx()
+    ax2.step(
+        first_hourly.index,
+        first_hourly["price"],
+        where="mid",
+        color="tab:red",
+        linestyle=":",
+        linewidth=1.5,
+        label="electricity price",
+    )
+    ax.set(xlabel="hour", ylabel="actual load [kWh/h]", title=title)
+    ax2.set_ylabel("electricity price [DKK/kWh]", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
+    ax.set_xticks(range(24))
+    lines, labels = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines + lines2, labels + labels2, fontsize=8, ncol=2)
+    return _finish(fig, save_to)
+
+
+def plot_battery_comparison(base: Results, with_battery: Results, data: InputData,
+                            save_to: Path | str | None = None) -> plt.Figure:
+    """Net grid exchange without/with battery, plus battery power and SoC."""
+    h = base.hourly.index.to_numpy()
+    b, w = base.hourly, with_battery.hourly
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6.5), sharex=True)
+
+    ax = axes[0]
+    ax.step(h, b["import"] - b["export"], where="mid", color="C0", label="no battery")
+    ax.step(h, w["import"] - w["export"], where="mid", color="C3", label="with battery")
+    ax2 = ax.twinx()
+    ax2.step(h, data.energy_price, where="mid", color="gray", ls="--", label="price")
+    ax2.set_ylabel("price, DKK/kWh")
+    ax.set(ylabel="net import, kWh/h", title="Grid exchange")
+    ax.legend(fontsize=8, loc="upper left")
+
+    ax = axes[1]
+    ax.bar(h, w["battery_charge"], 0.8, color="C2", label="charge")
+    ax.bar(h, -w["battery_discharge"], 0.8, color="C1", label="discharge")
+    ax3 = ax.twinx()
+    ax3.plot(h, w["soc"], color="k", label="SoC (end of hour)")
+    ax3.set_ylabel("SoC, kWh")
+    ax.set(xlabel="hour", ylabel="kWh/h", title="Battery")
+    ax.legend(fontsize=8, loc="upper left")
+    ax3.legend(fontsize=8, loc="upper right")
     return _finish(fig, save_to)
