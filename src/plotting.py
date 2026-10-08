@@ -15,6 +15,15 @@ from .model import Results
 
 
 def _finish(fig: plt.Figure, save_to: Path | str | None) -> plt.Figure:
+    """Finalize and optionally save a figure.
+
+    Args:
+        fig: Matplotlib figure to lay out and save.
+        save_to: Optional image path; the path has no physical units.
+
+    Returns:
+        The same Matplotlib figure.
+    """
     fig.tight_layout()
     if save_to is not None:
         Path(save_to).parent.mkdir(parents=True, exist_ok=True)
@@ -23,7 +32,15 @@ def _finish(fig: plt.Figure, save_to: Path | str | None) -> plt.Figure:
 
 
 def plot_inputs(data: InputData, save_to: Path | str | None = None) -> plt.Figure:
-    """Hourly prices (with tariffs) and available PV / load preferences, side by side."""
+    """Plot input prices, PV availability, and load preferences.
+
+    Args:
+        data: Case inputs; prices are in DKK/kWh and PV/load rates in kWh/h.
+        save_to: Optional image path; the path has no physical units.
+
+    Returns:
+        Matplotlib figure with hourly inputs.
+    """
     h = data.hours
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 3.8))
 
@@ -46,7 +63,16 @@ def plot_inputs(data: InputData, save_to: Path | str | None = None) -> plt.Figur
 
 
 def plot_schedule(results: Results, data: InputData, save_to: Path | str | None = None) -> plt.Figure:
-    """Optimal schedule: load, PV used, import/export, with prices on a second axis."""
+    """Plot the solved hourly schedule and electricity prices.
+
+    Args:
+        results: Solved case; energy rates are in kWh/h and prices in DKK/kWh.
+        data: Case inputs used for the plotted price and tariff context.
+        save_to: Optional image path; the path has no physical units.
+
+    Returns:
+        Matplotlib figure of hourly load, generation, grid exchange, and prices.
+    """
     hr = results.hourly
     h = hr.index.to_numpy()
     fig, ax = plt.subplots(figsize=(11, 4.2))
@@ -76,7 +102,16 @@ def plot_schedule(results: Results, data: InputData, save_to: Path | str | None 
 
 
 def plot_duals(results: Results, data: InputData, save_to: Path | str | None = None) -> plt.Figure:
-    """Hourly dual variables (all ``dual_*`` columns) against the price signals."""
+    """Plot hourly constraint duals alongside the import/export price signals.
+
+    Args:
+        results: Solved case with hourly dual columns; units depend on each constraint RHS.
+        data: Case prices and tariffs in DKK/kWh.
+        save_to: Optional image path; the path has no physical units.
+
+    Returns:
+        Matplotlib figure of dual values and price signals.
+    """
     hr = results.hourly
     dual_cols = [c for c in hr.columns if c.startswith("dual_")]
     fig, ax = plt.subplots(figsize=(11, 4))
@@ -97,9 +132,19 @@ def plot_scenario_comparison(
     values: dict[str, float] | None = None,
     ylabel: str | None = None,
 ) -> plt.Figure:
-    """Bar chart of one metric across scenarios. ``metric`` is ``"objective"`` or the name of an
-    hourly column whose daily sum is compared (e.g. ``"import"``, ``"export"``, ``"load"``).
-    Alternatively pass precomputed ``values`` (scenario name -> number) and a ``ylabel``."""
+    """Compare one objective, hourly total, or precomputed metric across scenarios.
+
+    Args:
+        runs: Optional scenario results; ``objective`` is in DKK/day, while hourly energy-rate
+            columns such as import, export, or load sum to kWh/day.
+        metric: ``objective`` or an hourly result column to aggregate over the day.
+        save_to: Optional image path; the path has no physical units.
+        values: Optional precomputed scenario values, used instead of ``runs`` when provided.
+        ylabel: Optional axis label, including the units of precomputed values.
+
+    Returns:
+        Matplotlib bar-chart figure.
+    """
     if values is not None:
         names, bars = list(values), list(values.values())
     else:
@@ -122,7 +167,16 @@ def plot_temporal_schedules(
     runs: dict[str, dict[str, Results]],
     save_to: Path | str | None = None,
 ) -> plt.Figure:
-    """Plot matched price profiles and resulting schedules for all preference models."""
+    """Plot matched hourly price profiles and the resulting load schedules.
+
+    Args:
+        profiles: Profile names mapped to hourly prices in DKK/kWh.
+        runs: Profile names mapped to model labels and solved results; load is in kWh/h.
+        save_to: Optional image path; the path has no physical units.
+
+    Returns:
+        Matplotlib figure comparing prices and hourly loads.
+    """
     fig, axes = plt.subplots(2, 2, figsize=(12, 7), sharex="col")
     for column, (profile_name, prices) in enumerate(profiles.items()):
         hours = np.arange(len(prices))
@@ -143,7 +197,15 @@ def plot_temporal_schedules(
 
 
 def plot_temporal_metrics(summary, save_to: Path | str | None = None) -> plt.Figure:
-    """Compare net objective-derived value and total absolute deviation by profile/model."""
+    """Compare net value and absolute load deviation by price profile and model.
+
+    Args:
+        summary: Table with profile/model labels, net value in DKK/day, and deviation in kWh/day.
+        save_to: Optional image path; the path has no physical units.
+
+    Returns:
+        Matplotlib figure of the two daily metrics.
+    """
     profiles = list(summary["price_profile"].drop_duplicates())
     models = list(summary["model"].drop_duplicates())
     x = np.arange(len(profiles))
@@ -166,12 +228,22 @@ def plot_temporal_metrics(summary, save_to: Path | str | None = None) -> plt.Fig
         axis.set(xticks=x, xticklabels=[profile.title() for profile in profiles], ylabel=ylabel, title=title)
         axis.grid(axis="y", alpha=0.2)
     axes[0].legend(fontsize=8)
-    
+    return _finish(fig, save_to)
+
 
 def plot_load_scenarios(
     runs: dict[str, Results], save_to: Path | str | None = None, title: str = "Actual load for sensitivity scenarios"
 ) -> plt.Figure:
-    """Plot the hourly actual load and reference profile for each scenario."""
+    """Plot hourly actual load, reference load, and electricity price by scenario.
+
+    Args:
+        runs: Scenario names mapped to solved results; loads are in kWh/h and prices in DKK/kWh.
+        save_to: Optional image path; the path has no physical units.
+        title: Figure title.
+
+    Returns:
+        Matplotlib figure of hourly load and price profiles.
+    """
     fig, ax = plt.subplots(figsize=(11, 4.2))
     for name, results in runs.items():
         hourly = results.hourly
@@ -209,7 +281,17 @@ def plot_load_scenarios(
 
 def plot_battery_comparison(base: Results, with_battery: Results, data: InputData,
                             save_to: Path | str | None = None) -> plt.Figure:
-    """Net grid exchange without/with battery, plus battery power and SoC."""
+    """Compare grid exchange and battery operation with and without storage.
+
+    Args:
+        base: Solved results without a battery; grid exchange is in kWh/h.
+        with_battery: Solved results with storage; charge/discharge are in kWh/h and SoC in kWh.
+        data: Case inputs providing hourly prices in DKK/kWh.
+        save_to: Optional image path; the path has no physical units.
+
+    Returns:
+        Matplotlib figure of grid exchange, battery power, and state of charge.
+    """
     h = base.hourly.index.to_numpy()
     b, w = base.hourly, with_battery.hourly
     fig, axes = plt.subplots(2, 1, figsize=(11, 6.5), sharex=True)
