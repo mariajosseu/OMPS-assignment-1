@@ -2,10 +2,9 @@
 
     python main.py                          # base case of Q1_caseA
     python main.py --question Q2_linear     # another case
-    python main.py --scenarios              # also run the example sensitivity scenarios
 
-Results (CSV, TXT, PNG) are written to ``results/<question>/``. Extend ``run_scenarios``
-with your own scenarios, or add a new function per question, as your analysis grows.
+Results (CSV, TXT, PNG) are written to ``results/<question>/``. See the README for
+the command corresponding to each experiment and its generated files.
 """
 from __future__ import annotations
 
@@ -42,6 +41,17 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 
 def run_base_case(question: str, out: Path, show: bool) -> Results | None:
+    """Solve one case and save its inputs, hourly results and figures.
+
+    Args:
+        question: Case name configured under ``data/``.
+        out: Directory for generated CSV, TXT and PNG files.
+        show: Whether to display figures interactively.
+
+    Returns:
+        Solved results (objective in DKK/day, daily energy in kWh, hourly rates in kWh/h,
+        and available duals in their constraint-specific units), or ``None`` if unsupported.
+    """
     data = load_question(question)
     print(data.summary(), "\n")
     plot_inputs(data, save_to=out / "inputs.png")
@@ -92,9 +102,9 @@ def run_q2e_experiment(
 
 
 def main() -> None:
+    """Parse experiment options and run the requested case and analyses."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--question", default="Q1_caseA", choices=list_questions(), help="data case to use")
-    parser.add_argument("--scenarios", action="store_true", help="also run the example sensitivity scenarios")
     parser.add_argument(
         "--linear-sweep",
         nargs="+",
